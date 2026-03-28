@@ -405,6 +405,32 @@
     /* Transicion direction selector */
     .dir-select { display: flex; gap: 4px; }
     .transition-opts { margin-top: 8px; }
+
+    /* ── Text Controls ──────────────────────────────────────────────── */
+    .text-controls { display: flex; flex-direction: column; gap: 8px; }
+    .tc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .tc-label { font-size: 12px; color: var(--muted); flex-shrink: 0; min-width: 72px; }
+    .tc-input {
+      background: var(--s3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: var(--sans);
+      flex: 1; min-width: 0;
+    }
+    .tc-input:focus { outline: none; border-color: var(--accent); }
+    .tc-select {
+      background: var(--s3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: 3px 6px; font-size: 12px; font-family: var(--sans);
+      flex: 1;
+    }
+    .tc-select:focus { outline: none; border-color: var(--accent); }
+    .tc-range { flex: 1; accent-color: var(--accent); }
+    .tc-mono { font-size: 12px; color: var(--text); font-family: var(--mono); flex-shrink: 0; min-width: 32px; text-align: right; }
+    .tc-color { border: none; background: none; cursor: pointer; width: 32px; height: 24px; padding: 0; border-radius: 4px; }
+
+    /* Text mode toggle in override panel */
+    .text-mode-group { display: flex; gap: 4px; flex-wrap: wrap; }
+
+    /* Drag cursor when hovering text overlay on canvas */
+    #previewCanvas.text-drag { cursor: move; }
   </style>
 </head>
 <body>
@@ -487,7 +513,7 @@
         fps: 30, quality: 'medium', filename: 'sequentia',
         loop: false,
         watermark: null, frame: null, vignette: 0, vignetteColor: '#000000',
-        globalText: null,
+        globalText: { title: '', subtitle: '', font: 'Inter', size: 48, color: '#ffffff', opacity: 1.0, position: { x: 0.5, y: 0.85 }, bgStyle: 'none', bgOpacity: 0.5, animation: 'none', visibleDuration: null },
         audio: null,
       },
       currentIndex: 0,
@@ -948,6 +974,11 @@
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
       }
+
+      // 5. Text overlay
+      const textObj = getEffectiveText(slide);
+      const slideDur = getEffectiveDuration(slide);
+      if (textObj) drawTextOverlay(ctx, textObj, t, w, h, slideDur);
     }
 
     function renderFrame(t = 0) {
@@ -1271,6 +1302,118 @@
       }
     }
 
+    // ── Task 9: Text Overlay ─────────────────────────────────────────
+
+    function makeDefaultText() {
+      return {
+        title: '', subtitle: '', font: 'Inter', size: 48,
+        color: '#ffffff', opacity: 1.0,
+        position: { x: 0.5, y: 0.85 },
+        bgStyle: 'none', bgOpacity: 0.5,
+        animation: 'none', visibleDuration: null,
+      };
+    }
+
+    function getEffectiveText(slide) {
+      const mode = slide?.overrides?.textMode ?? 'inherit';
+      if (mode === 'none') return null;
+      if (mode === 'own') return slide.overrides.text ?? null;
+      // 'inherit' — use global
+      const g = state.config.globalText;
+      if (!g || (!g.title && !g.subtitle)) return null;
+      return g;
+    }
+
+    function drawTextOverlay(ctx, textObj, t, w, h, slideDuration) {
+      if (!textObj) return;
+      const { title, subtitle, font, size, color, opacity, position, bgStyle, bgOpacity, animation, visibleDuration } = textObj;
+      if (!title && !subtitle) return;
+
+      // Visibility check
+      const dur = visibleDuration ?? slideDuration;
+      if (t * slideDuration > dur) return;
+
+      // Scale font size to current canvas width (design base: 1920px)
+      const scaledSize = size * w / 1920;
+      const subSize = scaledSize * 0.6;
+      const lineGap = scaledSize * 0.15;
+
+      // Animation alpha / offset
+      let alpha = opacity;
+      let offsetY = 0;
+      const FADE_IN = 0.3; // seconds
+      const elapsed = t * slideDuration;
+
+      if (animation === 'fade' || animation === 'slideup') {
+        if (elapsed < FADE_IN) {
+          alpha = opacity * (elapsed / FADE_IN);
+        }
+        if (animation === 'slideup' && elapsed < FADE_IN) {
+          const progress = elapsed / FADE_IN;
+          offsetY = (1 - progress) * scaledSize * 1.2;
+        }
+      }
+
+      // Measure text
+      ctx.save();
+      ctx.font = `600 ${scaledSize}px ${font}, sans-serif`;
+      const titleW = title ? ctx.measureText(title).width : 0;
+      ctx.font = `400 ${subSize}px ${font}, sans-serif`;
+      const subW = subtitle ? ctx.measureText(subtitle).width : 0;
+
+      const blockW = Math.max(titleW, subW);
+      const blockH = (title ? scaledSize : 0) + (subtitle ? subSize + lineGap : 0);
+
+      const cx = position.x * w;
+      const cy = position.y * h + offsetY;
+
+      // Draw background
+      if (bgStyle !== 'none') {
+        const padX = scaledSize * 0.5;
+        const padY = scaledSize * 0.25;
+        const bgX = cx - blockW / 2 - padX;
+        const bgY = cy - scaledSize - padY;
+        const bgW = blockW + padX * 2;
+        const bgH = blockH + padY * 2;
+
+        ctx.globalAlpha = bgOpacity;
+        ctx.fillStyle = '#000000';
+
+        if (bgStyle === 'pill') {
+          const r = (bgH / 2);
+          ctx.beginPath();
+          ctx.roundRect(bgX, bgY, bgW, bgH, r);
+          ctx.fill();
+        } else if (bgStyle === 'bar') {
+          ctx.fillRect(0, bgY, w, bgH);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // Draw title
+      if (title) {
+        ctx.globalAlpha = alpha;
+        ctx.font = `600 ${scaledSize}px ${font}, sans-serif`;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(title, cx, cy);
+      }
+
+      // Draw subtitle below title
+      if (subtitle) {
+        ctx.globalAlpha = alpha;
+        ctx.font = `400 ${subSize}px ${font}, sans-serif`;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        const subY = cy + (title ? lineGap + subSize : 0);
+        ctx.fillText(subtitle, cx, subY);
+      }
+
+      ctx.restore();
+    }
+
     // ── Task 7: Configuration Panels ────────────────────────────────
 
     function collapsibleSection(id, title, contentHTML, openByDefault = false) {
@@ -1290,6 +1433,133 @@
         section.classList.toggle('open');
       });
       return section;
+    }
+
+    // Build reusable text controls block bound to a textObj
+    function buildTextControls(textObj, onChange) {
+      const wrap = document.createElement('div');
+      wrap.className = 'text-controls';
+
+      const fontOptions = ['Inter','Playfair Display','Montserrat','Oswald','Lato']
+        .map(f => `<option value="${f}"${textObj.font === f ? ' selected' : ''}>${f}</option>`).join('');
+
+      wrap.innerHTML = `
+        <div class="tc-row">
+          <span class="tc-label">Título</span>
+          <input type="text" class="tc-input tc-title" placeholder="Título" value="${textObj.title ?? ''}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Subtítulo</span>
+          <input type="text" class="tc-input tc-subtitle" placeholder="Subtítulo (opcional)" value="${textObj.subtitle ?? ''}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Fuente</span>
+          <select class="tc-select tc-font">${fontOptions}</select>
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Tamaño <span class="tc-mono tc-size-val">${textObj.size ?? 48}</span></span>
+          <input type="range" class="tc-range tc-size" min="12" max="120" value="${textObj.size ?? 48}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Color</span>
+          <input type="color" class="tc-color tc-color-pick" value="${textObj.color ?? '#ffffff'}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Opacidad <span class="tc-mono tc-opacity-val">${(textObj.opacity ?? 1).toFixed(2)}</span></span>
+          <input type="range" class="tc-range tc-opacity" min="0" max="1" step="0.05" value="${textObj.opacity ?? 1}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Fondo</span>
+          <div class="pill-group tc-bg-options">
+            ${[['none','Ninguno'],['pill','Píldora'],['bar','Barra']].map(([v,l]) =>
+              `<button class="pill${(textObj.bgStyle ?? 'none') === v ? ' active' : ''}" data-bg="${v}">${l}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Op. fondo <span class="tc-mono tc-bgopacity-val">${(textObj.bgOpacity ?? 0.5).toFixed(2)}</span></span>
+          <input type="range" class="tc-range tc-bg-opacity" min="0" max="1" step="0.05" value="${textObj.bgOpacity ?? 0.5}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Animación</span>
+          <select class="tc-select tc-animation">
+            ${[['none','Sin animación'],['fade','Fade in'],['slideup','Slide up']].map(([v,l]) =>
+              `<option value="${v}"${(textObj.animation ?? 'none') === v ? ' selected' : ''}>${l}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">Duración vis.</span>
+          <input type="number" class="tc-input tc-duration" step="0.1" min="0.1"
+                 placeholder="Toda la duración" value="${textObj.visibleDuration ?? ''}">
+        </div>
+        <div class="tc-row" style="margin-top:4px">
+          <span class="tc-label" style="font-size:11px;color:var(--muted)">Posición X <span class="tc-mono tc-pos-x-val">${(textObj.position?.x ?? 0.5).toFixed(2)}</span></span>
+          <input type="range" class="tc-range tc-pos-x" min="0" max="1" step="0.01" value="${textObj.position?.x ?? 0.5}">
+        </div>
+        <div class="tc-row">
+          <span class="tc-label" style="font-size:11px;color:var(--muted)">Posición Y <span class="tc-mono tc-pos-y-val">${(textObj.position?.y ?? 0.85).toFixed(2)}</span></span>
+          <input type="range" class="tc-range tc-pos-y" min="0" max="1" step="0.01" value="${textObj.position?.y ?? 0.85}">
+        </div>
+      `;
+
+      function update() {
+        textObj.title    = wrap.querySelector('.tc-title').value;
+        textObj.subtitle = wrap.querySelector('.tc-subtitle').value;
+        textObj.font     = wrap.querySelector('.tc-font').value;
+        textObj.color    = wrap.querySelector('.tc-color-pick').value;
+        textObj.animation = wrap.querySelector('.tc-animation').value;
+        const durVal = parseFloat(wrap.querySelector('.tc-duration').value);
+        textObj.visibleDuration = isNaN(durVal) ? null : durVal;
+        onChange();
+      }
+
+      wrap.querySelector('.tc-title').addEventListener('input', update);
+      wrap.querySelector('.tc-subtitle').addEventListener('input', update);
+      wrap.querySelector('.tc-font').addEventListener('change', update);
+      wrap.querySelector('.tc-color-pick').addEventListener('input', update);
+      wrap.querySelector('.tc-animation').addEventListener('change', update);
+      wrap.querySelector('.tc-duration').addEventListener('change', update);
+
+      wrap.querySelector('.tc-size').addEventListener('input', e => {
+        textObj.size = parseInt(e.target.value);
+        wrap.querySelector('.tc-size-val').textContent = textObj.size;
+        onChange();
+      });
+
+      wrap.querySelector('.tc-opacity').addEventListener('input', e => {
+        textObj.opacity = parseFloat(e.target.value);
+        wrap.querySelector('.tc-opacity-val').textContent = textObj.opacity.toFixed(2);
+        onChange();
+      });
+
+      wrap.querySelector('.tc-bg-opacity').addEventListener('input', e => {
+        textObj.bgOpacity = parseFloat(e.target.value);
+        wrap.querySelector('.tc-bgopacity-val').textContent = textObj.bgOpacity.toFixed(2);
+        onChange();
+      });
+
+      wrap.querySelector('.tc-bg-options').addEventListener('click', e => {
+        const btn = e.target.closest('[data-bg]');
+        if (!btn) return;
+        textObj.bgStyle = btn.dataset.bg;
+        wrap.querySelectorAll('.tc-bg-options .pill').forEach(b => b.classList.toggle('active', b.dataset.bg === textObj.bgStyle));
+        onChange();
+      });
+
+      wrap.querySelector('.tc-pos-x').addEventListener('input', e => {
+        textObj.position.x = parseFloat(e.target.value);
+        wrap.querySelector('.tc-pos-x-val').textContent = textObj.position.x.toFixed(2);
+        onChange();
+      });
+
+      wrap.querySelector('.tc-pos-y').addEventListener('input', e => {
+        textObj.position.y = parseFloat(e.target.value);
+        wrap.querySelector('.tc-pos-y-val').textContent = textObj.position.y.toFixed(2);
+        onChange();
+      });
+
+      return wrap;
     }
 
     function buildConfigPanels() {
@@ -1425,6 +1695,17 @@
         </div>
       `;
       container.appendChild(collapsibleSection('export', 'Exportación', exportHTML));
+
+      // --- SECCIÓN TEXTO GLOBAL ---
+      const textoSection = collapsibleSection('texto', 'Texto Global', '');
+      const textoBody = textoSection.querySelector('.section-body');
+      // Ensure globalText exists
+      if (!state.config.globalText) state.config.globalText = makeDefaultText();
+      const textControls = buildTextControls(state.config.globalText, () => {
+        renderFrame(); saveProject(state);
+      });
+      textoBody.appendChild(textControls);
+      container.appendChild(textoSection);
 
       // Montar event listeners de los paneles
       bindConfigPanelEvents();
@@ -1717,6 +1998,8 @@
 
       const ov = slide.overrides || {};
 
+      const textMode = ov.textMode ?? 'inherit';
+
       panel.innerHTML = `
         <div class="ov-row">
           <span class="ov-label">Duración <span style="color:var(--text);font-family:var(--mono)">(global: ${state.config.slideDuration}s)</span></span>
@@ -1739,6 +2022,15 @@
           <input type="number" class="cfg-input ov-trans-duration" style="width:64px"
                  step="0.1" min="0" value="${ov.transitionDuration ?? ''}" placeholder="–">
         </div>
+        <div class="ov-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+          <span class="ov-label">Texto</span>
+          <div class="text-mode-group">
+            ${[['inherit','Heredar global'],['own','Texto propio'],['none','Sin texto']].map(([v,l]) =>
+              `<button class="pill${textMode === v ? ' active' : ''}" data-textmode="${v}">${l}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="ov-text-controls-wrap" style="display:${textMode === 'own' ? 'block' : 'none'}"></div>
         <button class="ov-clear">Eliminar todos los overrides</button>
       `;
 
@@ -1763,6 +2055,37 @@
         const val = parseFloat(e.target.value);
         slide.overrides.transitionDuration = isNaN(val) || val < 0 ? null : val;
         if (slide.overrides.transitionDuration === null) e.target.value = '';
+        saveProject(state);
+      });
+
+      // Texto mode toggle
+      const textWrap = panel.querySelector('.ov-text-controls-wrap');
+
+      function attachOwnTextControls() {
+        textWrap.innerHTML = '';
+        if (!slide.overrides.text) slide.overrides.text = makeDefaultText();
+        const tc = buildTextControls(slide.overrides.text, () => {
+          renderFrame(); saveProject(state);
+        });
+        textWrap.appendChild(tc);
+      }
+
+      if (textMode === 'own') attachOwnTextControls();
+
+      panel.querySelector('.text-mode-group').addEventListener('click', e => {
+        const btn = e.target.closest('[data-textmode]');
+        if (!btn) return;
+        const mode = btn.dataset.textmode;
+        slide.overrides.textMode = mode;
+        panel.querySelectorAll('.text-mode-group .pill').forEach(b => b.classList.toggle('active', b.dataset.textmode === mode));
+        if (mode === 'own') {
+          textWrap.style.display = 'block';
+          attachOwnTextControls();
+        } else {
+          textWrap.style.display = 'none';
+        }
+        renderFrame();
+        renderThumbs();
         saveProject(state);
       });
 
@@ -1894,6 +2217,95 @@
 
       // Task 5: Inicializar controles
       updatePlayControls();
+
+      // Task 9: Drag text overlay on preview canvas
+      (function setupTextDrag() {
+        const canvas = document.getElementById('previewCanvas');
+        let dragging = false;
+
+        function getTextObjForCurrentSlide() {
+          const slide = state.slides[state.currentIndex];
+          if (!slide) return null;
+          const mode = slide.overrides?.textMode ?? 'inherit';
+          if (mode === 'none') return null;
+          if (mode === 'own') {
+            if (!slide.overrides.text) slide.overrides.text = makeDefaultText();
+            return slide.overrides.text;
+          }
+          // inherit — edit global
+          if (!state.config.globalText) state.config.globalText = makeDefaultText();
+          return state.config.globalText;
+        }
+
+        function canvasToNorm(e) {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          return {
+            x: Math.max(0, Math.min(1, (e.clientX - rect.left) * scaleX / canvas.width)),
+            y: Math.max(0, Math.min(1, (e.clientY - rect.top) * scaleY / canvas.height)),
+          };
+        }
+
+        function isNearText(normX, normY, textObj) {
+          if (!textObj || (!textObj.title && !textObj.subtitle)) return false;
+          const dx = Math.abs(normX - textObj.position.x);
+          const dy = Math.abs(normY - textObj.position.y);
+          return dx < 0.15 && dy < 0.08;
+        }
+
+        canvas.addEventListener('mousedown', e => {
+          const textObj = getTextObjForCurrentSlide();
+          if (!textObj) return;
+          const pos = canvasToNorm(e);
+          if (isNearText(pos.x, pos.y, textObj)) {
+            dragging = true;
+            canvas.classList.add('text-drag');
+            e.preventDefault();
+          }
+        });
+
+        canvas.addEventListener('mousemove', e => {
+          if (!dragging) {
+            // Show move cursor when hovering near text
+            const textObj = getTextObjForCurrentSlide();
+            if (textObj) {
+              const pos = canvasToNorm(e);
+              canvas.style.cursor = isNearText(pos.x, pos.y, textObj) ? 'move' : '';
+            }
+            return;
+          }
+          const textObj = getTextObjForCurrentSlide();
+          if (!textObj) return;
+          const pos = canvasToNorm(e);
+          textObj.position.x = pos.x;
+          textObj.position.y = pos.y;
+          renderFrame();
+          // Sync position sliders if global text controls are visible
+          const xSlider = document.querySelector('#section-texto .tc-pos-x');
+          const ySlider = document.querySelector('#section-texto .tc-pos-y');
+          if (xSlider) { xSlider.value = pos.x; xSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
+          if (ySlider) { ySlider.value = pos.y; ySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+          if (dragging) {
+            dragging = false;
+            canvas.classList.remove('text-drag');
+            canvas.style.cursor = '';
+            saveProject(state);
+          }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+          if (dragging) {
+            dragging = false;
+            canvas.classList.remove('text-drag');
+            canvas.style.cursor = '';
+            saveProject(state);
+          }
+        });
+      })();
     }
 
     main();
