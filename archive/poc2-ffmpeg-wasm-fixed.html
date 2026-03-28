@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sequentia — POC 2: ffmpeg.wasm Fallback</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #09090b;
+  --s1:     #111113;
+  --s2:     #18181b;
+  --s3:     #27272a;
+  --border: #2e2e32;
+  --text:   #fafafa;
+  --muted:  #71717a;
+  --accent: #3b82f6;   /* blue for fallback — distinguishable from POC 1 orange */
+  --accent2:#60a5fa;
+  --green:  #22c55e;
+  --red:    #ef4444;
+  --orange: #f97316;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 56px 1fr;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; border-bottom: 1px solid var(--border);
+  background: var(--s1); position: sticky; top: 0; z-index: 100;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+.logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.logo em { color: var(--muted); font-style: normal; font-weight: 400; font-size: 12px; margin-left: 4px; font-family: var(--mono); }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.badge { font-family: var(--mono); font-size: 10px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--s3); }
+.badge.poc { border-color: var(--accent); color: var(--accent); }
+
+main { display: grid; grid-template-columns: 1fr 300px; gap: 1px; background: var(--border); overflow: hidden; }
+.col { background: var(--bg); display: flex; flex-direction: column; overflow-y: auto; }
+.col-left { padding: 20px; gap: 16px; display: flex; flex-direction: column; }
+.col-right { padding: 16px; gap: 12px; display: flex; flex-direction: column; }
+
+.panel { background: var(--s1); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.panel-head {
+  padding: 9px 14px; font-size: 10px; font-weight: 500; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--s2);
+}
+.panel-body { padding: 14px; }
+
+.preview-wrap { position: relative; background: #000; border-radius: 6px; overflow: hidden; aspect-ratio: 16/9; }
+#previewCanvas { width: 100%; height: 100%; display: block; }
+.preview-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 8px; color: var(--muted); font-size: 13px; pointer-events: none;
+}
+.preview-overlay svg { opacity: 0.3; }
+.preview-overlay.hidden { display: none; }
+.slide-counter {
+  position: absolute; bottom: 10px; right: 10px;
+  font-family: var(--mono); font-size: 11px; background: rgba(0,0,0,0.7);
+  padding: 3px 8px; border-radius: 4px; color: rgba(255,255,255,0.7); display: none;
+}
+
+.drop-zone {
+  border: 1px dashed var(--border); border-radius: 8px; padding: 28px 20px;
+  text-align: center; cursor: pointer; transition: all 0.15s;
+  color: var(--muted); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.drop-zone:hover, .drop-zone.over { border-color: var(--accent); background: rgba(59,130,246,0.04); color: var(--text); }
+.drop-zone .dz-icon { font-size: 28px; }
+.drop-zone kbd { font-family: var(--mono); font-size: 10px; background: var(--s3); border: 1px solid var(--border); padding: 1px 5px; border-radius: 3px; color: var(--muted); }
+
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.thumb { position: relative; width: 80px; height: 52px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); flex-shrink: 0; }
+.thumb:hover { border-color: var(--muted); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb-num { position: absolute; bottom: 2px; left: 3px; font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.8); text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+.thumb-del { position: absolute; top: 3px; right: 3px; width: 15px; height: 15px; background: rgba(239,68,68,0.9); border: none; border-radius: 50%; cursor: pointer; color: #fff; font-size: 10px; line-height: 1; display: none; align-items: center; justify-content: center; }
+.thumb:hover .thumb-del { display: flex; }
+
+.setting { margin-bottom: 12px; }
+.setting:last-child { margin-bottom: 0; }
+.setting label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.setting label span { font-family: var(--mono); color: var(--accent); font-size: 11px; }
+input[type="range"] { width: 100%; height: 3px; accent-color: var(--accent); cursor: pointer; background: var(--s3); border-radius: 2px; }
+select { width: 100%; background: var(--s2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: var(--sans); cursor: pointer; outline: none; }
+select:focus { border-color: var(--accent); }
+
+/* Loading state */
+.load-state {
+  padding: 16px;
+  background: var(--s2); border: 1px solid var(--border); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px;
+}
+.load-bar { width: 100%; height: 3px; background: var(--s3); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+.load-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.15s; }
+
+.audio-zone { border: 1px dashed var(--border); border-radius: 6px; padding: 10px 12px; cursor: pointer; font-size: 11px; font-family: var(--mono); color: var(--muted); text-align: center; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.audio-zone:hover { border-color: var(--muted); color: var(--text); }
+.audio-zone.loaded { border-color: var(--green); color: var(--green); }
+
+.estimate { font-family: var(--mono); font-size: 10px; color: var(--muted); text-align: center; padding: 6px 0; }
+
+.btn-export { width: 100%; padding: 11px 16px; background: var(--accent); border: none; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; font-family: var(--sans); cursor: pointer; transition: all 0.15s; letter-spacing: -0.01em; }
+.btn-export:hover:not(:disabled) { background: var(--accent2); }
+.btn-export:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.progress-track { width: 100%; height: 3px; background: var(--s3); border-radius: 2px; overflow: hidden; display: none; margin-top: 6px; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.15s linear; }
+
+.log { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; }
+.log .line-ok  { color: var(--green); }
+.log .line-err { color: var(--red); }
+.log .line-info{ color: var(--accent); }
+.log .line-warn{ color: #eab308; }
+
+.timing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.timing-card { background: var(--s2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; text-align: center; }
+.timing-card .val { font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--accent); }
+.timing-card .lbl { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+/* Comparison note */
+.note {
+  background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 6px; padding: 10px 12px; font-size: 11px; color: var(--muted); line-height: 1.5;
+}
+.note strong { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    Sequentia <em>/ poc-2</em>
+  </div>
+  <div class="header-right">
+    <span class="badge poc">ffmpeg.wasm fallback</span>
+    <span class="badge">Concat demuxer → libx264 + AAC → MP4</span>
+  </div>
+</header>
+
+<main>
+  <!-- ── LEFT ─── -->
+  <div class="col col-left">
+
+    <div class="panel">
+      <div class="panel-head">
+        Preview
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted)" id="previewLabel">Sin imágenes</span>
+      </div>
+      <div class="panel-body" style="padding:12px">
+        <div class="preview-wrap">
+          <canvas id="previewCanvas" width="1280" height="720"></canvas>
+          <div class="preview-overlay" id="previewOverlay">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+            </svg>
+            <span>Arrastra imágenes JPG / PNG aquí</span>
+          </div>
+          <div class="slide-counter" id="slideCounter"></div>
+        </div>
+
+        <div class="drop-zone" id="dropZone" style="margin-top:12px">
+          <span class="dz-icon">🖼️</span>
+          <span>Suelta imágenes o <kbd>click</kbd> para seleccionar</span>
+          <span style="font-size:11px;color:var(--muted)">JPG · PNG · múltiples a la vez</span>
+        </div>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png" multiple hidden>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+    </div>
+
+    <!-- Timing results -->
+    <div class="panel" id="timingPanel" style="display:none">
+      <div class="panel-head">Resultados de exportación (ffmpeg.wasm)</div>
+      <div class="panel-body">
+        <div class="timing-grid">
+          <div class="timing-card"><div class="val" id="tLoad">—</div><div class="lbl">Carga ffmpeg.wasm</div></div>
+          <div class="timing-card"><div class="val" id="tEncode">—</div><div class="lbl">Tiempo codificación</div></div>
+          <div class="timing-card"><div class="val" id="tSize">—</div><div class="lbl">Tamaño archivo</div></div>
+          <div class="timing-card"><div class="val" id="tRatio">—</div><div class="lbl">Ratio real/export</div></div>
+        </div>
+        <div class="note" style="margin-top:12px">
+          <strong>Nota del POC:</strong> Esta versión usa el core <strong>single-threaded</strong> de ffmpeg.wasm (sin SharedArrayBuffer). En producción, el fallback usaría el core <strong>multi-threaded</strong> con <code>coi-serviceworker</code> para mejor rendimiento.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── RIGHT ─── -->
+  <div class="col col-right">
+
+    <!-- FFmpeg load state -->
+    <div class="panel">
+      <div class="panel-head">Estado ffmpeg.wasm</div>
+      <div class="panel-body">
+        <div class="load-state" id="loadState">
+          <div id="loadMsg" style="color:var(--muted)">Esperando para inicializar...</div>
+          <div class="load-bar">
+            <div class="load-fill" id="loadFill"></div>
+          </div>
+        </div>
+        <button id="btnLoad" style="margin-top:10px;width:100%;padding:8px;background:var(--s3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;cursor:pointer;font-family:var(--sans)">
+          Inicializar ffmpeg.wasm
+        </button>
+      </div>
+    </div>
+
+    <!-- Audio -->
+    <div class="panel">
+      <div class="panel-head">Audio (opcional)</div>
+      <div class="panel-body">
+        <div class="audio-zone" id="audioDrop">🎵 MP3 / OGG / WAV</div>
+        <input type="file" id="audioInput" accept="audio/*" hidden>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="panel">
+      <div class="panel-head">Configuración</div>
+      <div class="panel-body">
+        <div class="setting">
+          <label>Duración por slide <span id="vSlide">3.0s</span></label>
+          <input type="range" id="rSlide" min="1" max="10" step="0.5" value="3">
+        </div>
+        <div class="setting">
+          <label>FPS</label>
+          <select id="sFps">
+            <option value="24">24 fps</option>
+            <option value="30" selected>30 fps</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label>Resolución</label>
+          <select id="sRes">
+            <option value="1280:720" selected>720p — 1280 × 720</option>
+            <option value="1920:1080">1080p — 1920 × 1080</option>
+          </select>
+        </div>
+        <div class="note" style="margin-top:4px">
+          <strong>ffmpeg.wasm:</strong> sin transiciones en este POC — validamos la codificación, audio y tiempos. Las transiciones se implementarán con filtros <code>xfade</code>.
+        </div>
+        <div class="estimate" id="estimate" style="margin-top:10px">—</div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="panel">
+      <div class="panel-head">Exportar</div>
+      <div class="panel-body">
+        <button class="btn-export" id="btnExport" disabled>Exportar MP4</button>
+        <div class="progress-track" id="progressTrack">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="log" id="log" style="margin-top:10px">
+          <div class="line-info">> POC 2 — ffmpeg.wasm fallback</div>
+          <div>> Pulsa "Inicializar" para cargar ffmpeg (~30MB).</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script type="module">
+// ─────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────
+let ffmpeg = null;
+let ffmpegLoaded = false;
+let loadTimeMs = 0;
+let slides = [];
+let audioFile = null;
+let previewTimer = null;
+let previewIdx = 0;
+let isExporting = false;
+
+// ─────────────────────────────────────────────────────────
+//  DOM
+// ─────────────────────────────────────────────────────────
+const canvas     = document.getElementById('previewCanvas');
+const ctx        = canvas.getContext('2d');
+const overlay    = document.getElementById('previewOverlay');
+const counter    = document.getElementById('slideCounter');
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+const thumbsCont = document.getElementById('thumbs');
+const audioDrop  = document.getElementById('audioDrop');
+const audioInput = document.getElementById('audioInput');
+const btnExport  = document.getElementById('btnExport');
+const btnLoad    = document.getElementById('btnLoad');
+const progressTrack = document.getElementById('progressTrack');
+const progressFill  = document.getElementById('progressFill');
+const estimateEl = document.getElementById('estimate');
+const loadMsg    = document.getElementById('loadMsg');
+const loadFill   = document.getElementById('loadFill');
+const timingPanel = document.getElementById('timingPanel');
+const previewLabel = document.getElementById('previewLabel');
+const rSlide = document.getElementById('rSlide');
+const sFps   = document.getElementById('sFps');
+const sRes   = document.getElementById('sRes');
+
+// ─────────────────────────────────────────────────────────
+//  FFMPEG LOAD
+// ─────────────────────────────────────────────────────────
+btnLoad.addEventListener('click', initFFmpeg);
+
+async function initFFmpeg() {
+  btnLoad.disabled = true;
+  btnLoad.textContent = 'Cargando...';
+  loadMsg.style.color = 'var(--accent)';
+  loadMsg.textContent = 'Comprobando entorno...';
+  setLoadProgress(5);
+
+  // ── Bloqueo duro en file:// ────────────────────────────────────────────────
+  // ffmpeg.wasm usa Workers con scripts cross-origin. El navegador bloquea
+  // Workers con URLs externas cuando el origen del documento es null (file://).
+  // No hay solución cliente pura — requiere ser servido desde localhost.
+  if (location.protocol === 'file:') {
+    loadMsg.innerHTML = '⚠ Debe servirse desde localhost';
+    loadMsg.style.color = 'var(--orange)';
+    setLoadProgress(0);
+    btnLoad.textContent = 'Ver instrucciones';
+    btnLoad.disabled = false;
+    btnLoad.onclick = showServeInstructions;
+    addLog('file:// detectado — ffmpeg.wasm requiere servidor HTTP.', 'warn');
+    addLog('Sirve el archivo con: python -m http.server 8080', 'warn');
+    addLog('Luego abre: http://localhost:8080/sequentia-poc2-ffmpeg.html', 'info');
+    showServeInstructions();
+    return;
+  }
+
+  const t0 = performance.now();
+  try {
+    const CDN_FFMPEG = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+    const CDN_CORE   = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+
+    // ── Paso 1: pre-descargar el worker chunk como blob ───────────────────────
+    // ffmpeg.wasm@0.12.x parte el bundle en dos chunks webpack: ffmpeg.min.js (main)
+    // y 814.ffmpeg.js (worker entry). Descargamos el worker chunk como blob para
+    // poder usarlo como Worker same-origin sin COOP/COEP.
+    addLog('Pre-descargando worker chunk...');
+    loadMsg.textContent = 'Descargando 814.ffmpeg.js...';
+    setLoadProgress(8);
+
+    const workerSrc = await fetch(`${CDN_FFMPEG}/814.ffmpeg.js`).then(r => {
+      if (!r.ok) throw new Error(`814.ffmpeg.js HTTP ${r.status}`);
+      return r.text();
+    });
+    const workerBlobURL = URL.createObjectURL(
+      new Blob([workerSrc], { type: 'text/javascript' })
+    );
+    setLoadProgress(18);
+    addLog('Worker chunk listo como blob.');
+
+    // ── Paso 2: monkey-patch Worker ───────────────────────────────────────────
+    // Interceptamos new Worker(url) — cualquier URL externa (no blob:, no data:)
+    // que cree el UMD de ffmpeg.wasm se redirige al blob descargado.
+    // IMPORTANTE: el patch debe mantenerse activo hasta DESPUÉS de ffmpeg.load(),
+    // porque el Worker se crea dentro de load(), no en el constructor ni en loadScript.
+    const OriginalWorker = window.Worker;
+    window.Worker = function(url, options) {
+      const urlStr = String(url);
+      if (!urlStr.startsWith('blob:') && !urlStr.startsWith('data:') && urlStr.includes('ffmpeg')) {
+        addLog(`Worker interceptado → blob (era: ${urlStr.split('/').pop()})`);
+        return new OriginalWorker(workerBlobURL, options);
+      }
+      return new OriginalWorker(url, options);
+    };
+    window.Worker.prototype = OriginalWorker.prototype;
+
+    // ── Paso 3: cargar el UMD normalmente vía <script> ────────────────────────
+    loadMsg.textContent = 'Cargando ffmpeg.min.js...';
+    setLoadProgress(22);
+    await loadScript(`${CDN_FFMPEG}/ffmpeg.min.js`);
+    // NO restaurar window.Worker aquí — el Worker se crea en ffmpeg.load(), no ahora
+    setLoadProgress(32);
+
+    const FFmpegClass = window.FFmpegWASM?.FFmpeg ?? window.FFmpeg?.FFmpeg ?? window.FFmpeg;
+    if (!FFmpegClass) throw new Error('Clase FFmpeg no encontrada. Revisa la consola del navegador.');
+
+    ffmpeg = new FFmpegClass();
+    ffmpeg.on('log',      ({ message })  => { if (message.trim()) addLog(message.slice(0, 80)); });
+    ffmpeg.on('progress', ({ progress }) => { setProgress(Math.min(progress * 100, 99)); });
+    addLog('FFmpeg instanciado.');
+
+    // ── Paso 4: core wasm blobificado ─────────────────────────────────────────
+    loadMsg.textContent = 'Descargando ffmpeg-core.js...';
+    const fetchBlob = async (url, type, onProgress) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+      const total = +res.headers.get('content-length') || 0;
+      const reader = res.body.getReader();
+      const chunks = []; let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value); received += value.length;
+        if (total && onProgress) onProgress(received / total);
+      }
+      return URL.createObjectURL(new Blob(chunks, { type }));
+    };
+
+    const [coreURL, wasmURL] = await Promise.all([
+      fetchBlob(`${CDN_CORE}/ffmpeg-core.js`, 'text/javascript',
+        p => { setLoadProgress(32 + p * 33); loadMsg.textContent = `ffmpeg-core.js: ${(p*100).toFixed(0)}%`; }),
+      fetchBlob(`${CDN_CORE}/ffmpeg-core.wasm`, 'application/wasm',
+        p => { setLoadProgress(65 + p * 30); loadMsg.textContent = `ffmpeg-core.wasm: ${(p*100).toFixed(0)}%`; }),
+    ]);
+
+    setLoadProgress(97);
+    loadMsg.textContent = 'Inicializando...';
+    addLog('Inicializando core...');
+    await ffmpeg.load({ coreURL, wasmURL });
+    window.Worker = OriginalWorker; // restaurar ahora que el Worker ya fue creado
+
+    loadTimeMs = performance.now() - t0;
+    ffmpegLoaded = true;
+    setLoadProgress(100);
+    loadMsg.textContent = `✓ listo en ${(loadTimeMs/1000).toFixed(1)}s`;
+    loadMsg.style.color = 'var(--green)';
+    btnLoad.textContent = `✓ ffmpeg.wasm (${(loadTimeMs/1000).toFixed(1)}s)`;
+    btnLoad.style.background = 'rgba(34,197,94,0.1)';
+    btnLoad.style.borderColor = 'var(--green)';
+    btnLoad.style.color = 'var(--green)';
+    addLog(`ffmpeg.wasm listo en ${(loadTimeMs/1000).toFixed(1)}s`, 'ok');
+    updateUI();
+
+  } catch(e) {
+    loadMsg.textContent = `Error: ${e.message}`;
+    loadMsg.style.color = 'var(--red)';
+    btnLoad.disabled = false;
+    btnLoad.textContent = 'Reintentar';
+    addLog(`Error al cargar ffmpeg: ${e.message}`, 'err');
+    console.error(e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  IMAGES
+// ─────────────────────────────────────────────────────────
+async function loadImg(file) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload  = () => res({ file, img, url });
+    img.onerror = () => rej(new Error(`Error: ${file.name}`));
+    img.src = url;
+  });
+}
+
+async function addSlides(files) {
+  const valid = Array.from(files).filter(f =>
+    f.type === 'image/jpeg' || f.type === 'image/png'
+  );
+  if (!valid.length) return;
+  addLog(`Cargando ${valid.length} imagen(es)...`);
+  const loaded = await Promise.all(valid.map(loadImg));
+  slides.push(...loaded);
+  renderThumbs();
+  startPreview();
+  updateUI();
+  addLog(`${slides.length} slide(s) listos.`, 'ok');
+}
+
+function removeSlide(i) {
+  URL.revokeObjectURL(slides[i].url);
+  slides.splice(i, 1);
+  renderThumbs();
+  updateUI();
+  if (slides.length) startPreview();
+  else { ctx.clearRect(0,0,canvas.width,canvas.height); showOverlay(true); }
+}
+
+function renderThumbs() {
+  thumbsCont.innerHTML = '';
+  slides.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    div.innerHTML = `<img src="${s.url}"><span class="thumb-num">${i+1}</span><button class="thumb-del" data-i="${i}">×</button>`;
+    div.querySelector('.thumb-del').onclick = e => { e.stopPropagation(); removeSlide(+e.target.dataset.i); };
+    thumbsCont.appendChild(div);
+  });
+  dropZone.style.display = slides.length ? 'none' : '';
+  showOverlay(!slides.length);
+}
+
+// ─────────────────────────────────────────────────────────
+//  PREVIEW
+// ─────────────────────────────────────────────────────────
+function startPreview() {
+  if (previewTimer) clearInterval(previewTimer);
+  previewIdx = 0;
+  drawPreview();
+  previewTimer = setInterval(() => {
+    previewIdx = (previewIdx + 1) % slides.length;
+    drawPreview();
+  }, +rSlide.value * 1000);
+}
+
+function drawPreview() {
+  if (!slides.length) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawCoverCtx(ctx, slides[previewIdx].img, canvas.width, canvas.height);
+  counter.textContent = `${previewIdx + 1} / ${slides.length}`;
+  counter.style.display = '';
+  previewLabel.textContent = `${previewIdx + 1} de ${slides.length}`;
+}
+
+function showOverlay(show) { overlay.classList.toggle('hidden', !show); }
+
+// ─────────────────────────────────────────────────────────
+//  DRAG & DROP
+// ─────────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => addSlides(e.target.files));
+['dragenter','dragover'].forEach(ev => {
+  document.addEventListener(ev, e => e.preventDefault());
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('over'); });
+});
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.remove('over')));
+dropZone.addEventListener('drop', e => { e.preventDefault(); addSlides(e.dataTransfer.files); });
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const imgs = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  const auds = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
+  if (imgs.length) addSlides(imgs);
+  if (auds.length) setAudio(auds[0]);
+});
+document.addEventListener('dragover', e => e.preventDefault());
+
+// ─────────────────────────────────────────────────────────
+//  AUDIO
+// ─────────────────────────────────────────────────────────
+audioDrop.addEventListener('click', () => audioInput.click());
+audioInput.addEventListener('change', e => { if (e.target.files[0]) setAudio(e.target.files[0]); });
+function setAudio(f) {
+  audioFile = f;
+  audioDrop.textContent = `🎵 ${f.name}`;
+  audioDrop.classList.add('loaded');
+  addLog(`Audio: ${f.name}`);
+  updateUI();
+}
+
+// ─────────────────────────────────────────────────────────
+//  SETTINGS
+// ─────────────────────────────────────────────────────────
+rSlide.addEventListener('input', () => {
+  document.getElementById('vSlide').textContent = `${(+rSlide.value).toFixed(1)}s`;
+  updateUI();
+  if (slides.length) startPreview();
+});
+sFps.addEventListener('change', updateUI);
+sRes.addEventListener('change', updateUI);
+
+function updateUI() {
+  btnExport.disabled = !slides.length || !ffmpegLoaded || isExporting;
+  if (!slides.length) { estimateEl.textContent = '—'; return; }
+  const dur = slides.length * +rSlide.value;
+  const br  = 8_000_000 + (audioFile ? 128_000 : 0);
+  const mb  = (br * dur / 8 / 1024 / 1024).toFixed(1);
+  estimateEl.textContent = `~${mb} MB · ${dur.toFixed(1)}s · ${+sFps.value} fps`;
+}
+
+// ─────────────────────────────────────────────────────────
+//  EXPORT
+// ─────────────────────────────────────────────────────────
+btnExport.addEventListener('click', runExport);
+
+async function runExport() {
+  if (!slides.length || !ffmpegLoaded || isExporting) return;
+  isExporting = true;
+  btnExport.disabled = true;
+  progressTrack.style.display = 'block';
+  timingPanel.style.display = 'none';
+  setProgress(0);
+
+  const slideDur = +rSlide.value;
+  const FPS      = +sFps.value;
+  const res      = sRes.value; // e.g. "1280:720"
+  const totalDur = slides.length * slideDur;
+
+  addLog(`─── Exportación ffmpeg.wasm ───`);
+  addLog(`${slides.length} slides · ${totalDur.toFixed(1)}s · ${res.replace(':','×')}@${FPS}`);
+
+  const t0 = performance.now();
+
+  // Helper: leer File como Uint8Array sin depender de fetchFile (evita CORS)
+  const readFile = (file) => file.arrayBuffer().then(ab => new Uint8Array(ab));
+
+  try {
+    // ── Write images to ffmpeg FS ───────────────────────
+    addLog('Escribiendo imágenes al sistema de archivos virtual...');
+    for (let i = 0; i < slides.length; i++) {
+      const ext  = slides[i].file.type === 'image/png' ? 'png' : 'jpg';
+      const name = `img${String(i).padStart(3,'0')}.${ext}`;
+      const data = await readFile(slides[i].file);
+      await ffmpeg.writeFile(name, data);
+      setProgress(i / slides.length * 15);
+    }
+    addLog('Imágenes escritas.');
+
+    // ── Build concat file ────────────────────────────────
+    // ffmpeg concat demuxer format:
+    // file 'img000.jpg'
+    // duration 3
+    // file 'img001.jpg'
+    // duration 3
+    // file 'img001.jpg'  ← last image repeated without duration (required)
+    let concatContent = '';
+    for (let i = 0; i < slides.length; i++) {
+      const ext  = slides[i].file.type === 'image/png' ? 'png' : 'jpg';
+      const name = `img${String(i).padStart(3,'0')}.${ext}`;
+      concatContent += `file '${name}'\nduration ${slideDur}\n`;
+    }
+    // Append last file without duration (concat demuxer requirement)
+    const lastExt  = slides[slides.length - 1].file.type === 'image/png' ? 'png' : 'jpg';
+    const lastName = `img${String(slides.length - 1).padStart(3,'0')}.${lastExt}`;
+    concatContent += `file '${lastName}'\n`;
+
+    await ffmpeg.writeFile('input.txt', concatContent);
+    addLog('Archivo concat generado.');
+    setProgress(18);
+
+    // ── Write audio if present ───────────────────────────
+    let hasAudio = false;
+    if (audioFile) {
+      addLog('Escribiendo audio...');
+      const audioData = await readFile(audioFile);
+      await ffmpeg.writeFile('audio.mp3', audioData);
+      hasAudio = true;
+      addLog(`Audio escrito: ${audioFile.name}`);
+    }
+    setProgress(22);
+
+    // ── Run ffmpeg ───────────────────────────────────────
+    addLog('Ejecutando ffmpeg...');
+    const tEncode = performance.now();
+
+    const ffmpegArgs = [
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', 'input.txt',
+      ...(hasAudio ? ['-i', 'audio.mp3'] : []),
+      '-vf', `scale=${res}:force_original_aspect_ratio=decrease,pad=${res}:(ow-iw)/2:(oh-ih)/2:black`,
+      '-c:v', 'libx264',
+      '-preset', 'fast',      // balance speed/quality
+      '-crf', '22',           // quality (lower = better, 18-28 typical range)
+      '-pix_fmt', 'yuv420p',  // required for broad compatibility
+      '-r', String(FPS),
+      ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
+      '-movflags', '+faststart',
+      'output.mp4'
+    ];
+
+    addLog(`Args: ${ffmpegArgs.join(' ')}`, 'info');
+    await ffmpeg.exec(ffmpegArgs);
+
+    const encodeMs = performance.now() - tEncode;
+    addLog(`Codificación: ${(encodeMs/1000).toFixed(1)}s`, 'ok');
+    setProgress(95);
+
+    // ── Read output ──────────────────────────────────────
+    const data = await ffmpeg.readFile('output.mp4');
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+    addLog(`Archivo generado: ${sizeMB} MB`, 'ok');
+
+    setProgress(100);
+
+    // Download
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = 'sequentia-poc2.mp4'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    addLog('✓ Descarga iniciada.', 'ok');
+
+    // Cleanup ffmpeg FS
+    for (let i = 0; i < slides.length; i++) {
+      const ext  = slides[i].file.type === 'image/png' ? 'png' : 'jpg';
+      await ffmpeg.deleteFile(`img${String(i).padStart(3,'0')}.${ext}`).catch(() => {});
+    }
+    await ffmpeg.deleteFile('input.txt').catch(() => {});
+    if (hasAudio) await ffmpeg.deleteFile('audio.mp3').catch(() => {});
+    await ffmpeg.deleteFile('output.mp4').catch(() => {});
+
+    const totalMs = performance.now() - t0;
+    showTimings(loadTimeMs, encodeMs, +sizeMB, totalDur);
+
+  } catch(e) {
+    addLog(`✗ ${e.message}`, 'err');
+    console.error(e);
+    btnExport.textContent = '✗ Error — Reintentar';
+  } finally {
+    isExporting = false;
+    progressTrack.style.display = 'none';
+    setTimeout(() => {
+      btnExport.textContent = 'Exportar MP4';
+      btnExport.disabled = !slides.length || !ffmpegLoaded;
+    }, 3000);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────────────────
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`No se pudo cargar: ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+function showServeInstructions() {
+  const existing = document.getElementById('serveModal');
+  if (existing) { existing.remove(); return; }
+  const modal = document.createElement('div');
+  modal.id = 'serveModal';
+  modal.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,0.85);
+    display:flex;align-items:center;justify-content:center;z-index:9999;
+  `;
+  modal.innerHTML = `
+    <div style="background:#18181b;border:1px solid #3b82f6;border-radius:12px;
+                padding:28px 32px;max-width:520px;width:90%;font-family:var(--mono)">
+      <div style="color:#3b82f6;font-size:14px;font-weight:600;margin-bottom:16px">
+        ⚠ ffmpeg.wasm requiere servidor HTTP
+      </div>
+      <div style="color:#a1a1aa;font-size:11px;line-height:1.7;margin-bottom:20px">
+        Este archivo se abrió con <code style="color:#f97316">file://</code>.
+        Los Workers de ffmpeg.wasm no pueden cargar scripts cross-origin desde
+        ese origen — es una restricción de seguridad del navegador sin solución cliente pura.<br><br>
+        Sirve el archivo desde un servidor local:
+      </div>
+      <div style="background:#09090b;border:1px solid #27272a;border-radius:6px;
+                  padding:12px 16px;font-size:12px;color:#22c55e;margin-bottom:12px">
+        # Python 3<br>
+        python -m http.server 8080<br><br>
+        # Node.js (npx)<br>
+        npx serve .
+      </div>
+      <div style="color:#a1a1aa;font-size:11px;margin-bottom:20px">
+        Luego abre:
+        <span style="color:#3b82f6">http://localhost:8080/sequentia-poc2-ffmpeg.html</span>
+      </div>
+      <div style="color:#52525b;font-size:10px;line-height:1.5">
+        Nota: En producción, Sequentia se servirá desde HTTPS — este problema no existirá.
+        Este POC solo valida velocidad y calidad de ffmpeg.wasm como motor de fallback.
+      </div>
+      <button onclick="document.getElementById('serveModal').remove()"
+        style="margin-top:16px;width:100%;padding:8px;background:#27272a;
+               border:1px solid #3f3f46;border-radius:6px;color:#fafafa;
+               font-size:12px;cursor:pointer;font-family:var(--sans)">
+        Cerrar
+      </button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function drawCoverCtx(ctx, img, w, h) {
+  ctx.clearRect(0, 0, w, h);
+  // Fondo blur
+  ctx.save();
+  ctx.filter = 'blur(24px)';
+  const sc = Math.max(w / img.naturalWidth, h / img.naturalHeight) * 1.08;
+  ctx.drawImage(img, (w - sc * img.naturalWidth) / 2, (h - sc * img.naturalHeight) / 2,
+    sc * img.naturalWidth, sc * img.naturalHeight);
+  ctx.filter = 'none';
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+  // Imagen contenida
+  const s  = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const sw = img.naturalWidth * s, sh = img.naturalHeight * s;
+  ctx.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh);
+}
+
+function setProgress(pct) {
+  progressFill.style.width = `${pct}%`;
+  if (pct < 100) btnExport.textContent = `Exportando ${Math.round(pct)}%`;
+}
+
+function setLoadProgress(pct) { loadFill.style.width = `${pct}%`; }
+
+function addLog(msg, type) {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = type ? `line-${type}` : '';
+  div.textContent = `> ${msg}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function showTimings(loadMs, encodeMs, sizeMB, videoDur) {
+  document.getElementById('tLoad').textContent   = `${(loadMs/1000).toFixed(1)}s`;
+  document.getElementById('tEncode').textContent = `${(encodeMs/1000).toFixed(1)}s`;
+  document.getElementById('tSize').textContent   = `${sizeMB} MB`;
+  document.getElementById('tRatio').textContent  = `${(videoDur / (encodeMs/1000)).toFixed(1)}×`;
+  timingPanel.style.display = '';
+}
+</script>
+</body>
+</html>

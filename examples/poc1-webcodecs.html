@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sequentia — POC 1: WebCodecs Export</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #09090b;
+  --s1:       #111113;
+  --s2:       #18181b;
+  --s3:       #27272a;
+  --border:   #2e2e32;
+  --text:     #fafafa;
+  --muted:    #71717a;
+  --accent:   #f97316;
+  --accent2:  #fb923c;
+  --green:    #22c55e;
+  --red:      #ef4444;
+  --blue:     #3b82f6;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 56px 1fr;
+}
+
+/* ─── HEADER ─────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--s1);
+  position: sticky; top: 0; z-index: 100;
+}
+.logo {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 600; letter-spacing: -0.02em;
+}
+.logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.logo em { color: var(--muted); font-style: normal; font-weight: 400; font-size: 12px; margin-left: 4px; font-family: var(--mono); }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.badge {
+  font-family: var(--mono); font-size: 10px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  color: var(--muted); background: var(--s3);
+}
+.badge.poc { border-color: var(--accent); color: var(--accent); }
+
+/* ─── LAYOUT ─────────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+.col {
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.col-left { padding: 20px; gap: 16px; display: flex; flex-direction: column; }
+.col-right { padding: 16px; gap: 12px; display: flex; flex-direction: column; }
+
+/* ─── PANEL ─────────────────────────────────────────── */
+.panel {
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.panel-head {
+  padding: 9px 14px;
+  font-size: 10px; font-weight: 500; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--s2);
+}
+.panel-body { padding: 14px; }
+
+/* ─── CANVAS PREVIEW ────────────────────────────────── */
+.preview-wrap {
+  position: relative;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  aspect-ratio: 16/9;
+}
+#previewCanvas {
+  width: 100%; height: 100%;
+  display: block;
+}
+.preview-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+.preview-overlay svg { opacity: 0.3; }
+.preview-overlay.hidden { display: none; }
+
+/* slide counter */
+.slide-counter {
+  position: absolute; bottom: 10px; right: 10px;
+  font-family: var(--mono); font-size: 11px;
+  background: rgba(0,0,0,0.7);
+  padding: 3px 8px; border-radius: 4px;
+  color: rgba(255,255,255,0.7);
+  display: none;
+}
+
+/* ─── DROP ZONE ─────────────────────────────────────── */
+.drop-zone {
+  border: 1px dashed var(--border);
+  border-radius: 8px; padding: 28px 20px;
+  text-align: center; cursor: pointer;
+  transition: all 0.15s;
+  color: var(--muted); font-size: 13px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.drop-zone:hover, .drop-zone.over {
+  border-color: var(--accent);
+  background: rgba(249,115,22,0.04);
+  color: var(--text);
+}
+.drop-zone .dz-icon { font-size: 28px; }
+.drop-zone kbd {
+  font-family: var(--mono); font-size: 10px;
+  background: var(--s3); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 3px; color: var(--muted);
+}
+
+/* ─── THUMBNAILS ────────────────────────────────────── */
+.thumbs {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+}
+.thumb {
+  position: relative; width: 80px; height: 52px;
+  border-radius: 5px; overflow: hidden;
+  border: 1px solid var(--border);
+  flex-shrink: 0; cursor: default;
+  transition: border-color 0.15s;
+}
+.thumb:hover { border-color: var(--muted); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb-num {
+  position: absolute; bottom: 2px; left: 3px;
+  font-family: var(--mono); font-size: 9px;
+  color: rgba(255,255,255,0.8);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+.thumb-del {
+  position: absolute; top: 3px; right: 3px;
+  width: 15px; height: 15px;
+  background: rgba(239,68,68,0.9);
+  border: none; border-radius: 50%; cursor: pointer;
+  color: #fff; font-size: 10px; line-height: 1;
+  display: none; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.thumb:hover .thumb-del { display: flex; }
+
+/* ─── SETTINGS ──────────────────────────────────────── */
+.setting { margin-bottom: 12px; }
+.setting:last-child { margin-bottom: 0; }
+.setting label {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted);
+  margin-bottom: 6px;
+}
+.setting label span { font-family: var(--mono); color: var(--accent); font-size: 11px; }
+input[type="range"] {
+  width: 100%; height: 3px;
+  accent-color: var(--accent); cursor: pointer;
+  background: var(--s3); border-radius: 2px;
+}
+select {
+  width: 100%; background: var(--s2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 12px; font-family: var(--sans);
+  cursor: pointer; outline: none;
+}
+select:focus { border-color: var(--accent); }
+
+/* ─── COMPAT ────────────────────────────────────────── */
+.compat-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; font-family: var(--mono);
+}
+.compat-row:last-child { border-bottom: none; }
+.dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  transition: background 0.3s;
+}
+.dot.green { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.dot.red   { background: var(--red);   box-shadow: 0 0 5px var(--red);   }
+.dot.grey  { background: var(--muted); }
+.dot.pulse { animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ─── AUDIO ZONE ────────────────────────────────────── */
+.audio-zone {
+  border: 1px dashed var(--border); border-radius: 6px;
+  padding: 10px 12px; cursor: pointer;
+  font-size: 11px; font-family: var(--mono);
+  color: var(--muted); text-align: center;
+  transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.audio-zone:hover { border-color: var(--muted); color: var(--text); }
+.audio-zone.loaded { border-color: var(--green); color: var(--green); }
+
+/* ─── ESTIMATE ──────────────────────────────────────── */
+.estimate {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  text-align: center; padding: 6px 0;
+}
+
+/* ─── EXPORT BTN ────────────────────────────────────── */
+.btn-export {
+  width: 100%; padding: 11px 16px;
+  background: var(--accent); border: none; border-radius: 8px;
+  color: #fff; font-size: 13px; font-weight: 600;
+  font-family: var(--sans); cursor: pointer;
+  transition: all 0.15s; letter-spacing: -0.01em;
+}
+.btn-export:hover:not(:disabled) { background: var(--accent2); }
+.btn-export:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ─── PROGRESS ──────────────────────────────────────── */
+.progress-track {
+  width: 100%; height: 3px; background: var(--s3);
+  border-radius: 2px; overflow: hidden; display: none;
+  margin-top: 6px;
+}
+.progress-fill {
+  height: 100%; background: var(--accent);
+  border-radius: 2px; width: 0%;
+  transition: width 0.08s linear;
+}
+
+/* ─── LOG ───────────────────────────────────────────── */
+.log {
+  font-family: var(--mono); font-size: 10px;
+  line-height: 1.7; color: var(--muted);
+  height: 120px; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 8px 10px;
+  scroll-behavior: smooth;
+}
+.log .line-ok   { color: var(--green); }
+.log .line-err  { color: var(--red); }
+.log .line-info { color: var(--blue); }
+.log .line-warn { color: #eab308; }
+
+/* ─── TIMING ────────────────────────────────────────── */
+.timing-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-top: 4px;
+}
+.timing-card {
+  background: var(--s2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px;
+  text-align: center;
+}
+.timing-card .val {
+  font-family: var(--mono); font-size: 20px; font-weight: 500;
+  color: var(--accent);
+}
+.timing-card .lbl { font-size: 10px; color: var(--muted); margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    Sequentia <em>/ poc-1</em>
+  </div>
+  <div class="header-right">
+    <span class="badge poc">WebCodecs + mp4-muxer</span>
+    <span class="badge">Canvas → H.264 + AAC → MP4</span>
+  </div>
+</header>
+
+<main>
+  <!-- ── LEFT COL ─────────────────────────────── -->
+  <div class="col col-left">
+
+    <div class="panel">
+      <div class="panel-head">
+        Preview
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted)" id="previewLabel">Sin imágenes</span>
+      </div>
+      <div class="panel-body" style="padding:12px">
+        <div class="preview-wrap">
+          <canvas id="previewCanvas" width="1280" height="720"></canvas>
+          <div class="preview-overlay" id="previewOverlay">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+              <path d="m21 15-5-5L5 21"/>
+            </svg>
+            <span>Arrastra imágenes JPG / PNG aquí</span>
+          </div>
+          <div class="slide-counter" id="slideCounter"></div>
+        </div>
+
+        <div class="drop-zone" id="dropZone" style="margin-top:12px">
+          <span class="dz-icon">🖼️</span>
+          <span>Suelta imágenes o <kbd>click</kbd> para seleccionar</span>
+          <span style="font-size:11px;color:var(--muted)">JPG · PNG · múltiples a la vez</span>
+        </div>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png" multiple hidden>
+
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+    </div>
+
+    <!-- Timing results -->
+    <div class="panel" id="timingPanel" style="display:none">
+      <div class="panel-head">Resultados de exportación</div>
+      <div class="panel-body">
+        <div class="timing-grid">
+          <div class="timing-card"><div class="val" id="tTime">—</div><div class="lbl">Tiempo codificación</div></div>
+          <div class="timing-card"><div class="val" id="tSpeed">—</div><div class="lbl">Velocidad (frames/s)</div></div>
+          <div class="timing-card"><div class="val" id="tSize">—</div><div class="lbl">Tamaño archivo</div></div>
+          <div class="timing-card"><div class="val" id="tRatio">—</div><div class="lbl">Ratio real/export</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── RIGHT COL ────────────────────────────── -->
+  <div class="col col-right">
+
+    <!-- Compat -->
+    <div class="panel">
+      <div class="panel-head">Compatibilidad navegador</div>
+      <div class="panel-body" style="padding:10px 14px">
+        <div class="compat-row">
+          <div class="dot pulse grey" id="dVC"></div>
+          <span id="lVC">VideoEncoder (H.264)</span>
+        </div>
+        <div class="compat-row">
+          <div class="dot pulse grey" id="dAC"></div>
+          <span id="lAC">AudioEncoder (AAC)</span>
+        </div>
+        <div class="compat-row">
+          <div class="dot pulse grey" id="dMX"></div>
+          <span id="lMX">mp4-muxer (CDN)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio -->
+    <div class="panel">
+      <div class="panel-head">Audio (opcional)</div>
+      <div class="panel-body">
+        <div class="audio-zone" id="audioDrop">
+          🎵 MP3 / OGG / WAV
+        </div>
+        <input type="file" id="audioInput" accept="audio/*" hidden>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="panel">
+      <div class="panel-head">Configuración</div>
+      <div class="panel-body">
+
+        <div class="setting">
+          <label>Duración por slide <span id="vSlide">3.0s</span></label>
+          <input type="range" id="rSlide" min="1" max="10" step="0.5" value="3">
+        </div>
+
+        <div class="setting">
+          <label>Duración transición <span id="vTrans">0.5s</span></label>
+          <input type="range" id="rTrans" min="0" max="2" step="0.1" value="0.5">
+        </div>
+
+        <div class="setting">
+          <label>FPS</label>
+          <select id="sFps">
+            <option value="24">24 fps</option>
+            <option value="30" selected>30 fps</option>
+            <option value="60">60 fps</option>
+          </select>
+        </div>
+
+        <div class="setting">
+          <label>Resolución</label>
+          <select id="sRes">
+            <option value="1280x720" selected>720p — 1280 × 720</option>
+            <option value="1920x1080">1080p — 1920 × 1080</option>
+          </select>
+        </div>
+
+        <div class="estimate" id="estimate">—</div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div class="panel">
+      <div class="panel-head">Exportar</div>
+      <div class="panel-body">
+        <button class="btn-export" id="btnExport" disabled>Exportar MP4</button>
+        <div class="progress-track" id="progressTrack">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="log" id="log" style="margin-top:10px">
+          <div class="line-info">> POC 1 — WebCodecs + mp4-muxer</div>
+          <div>> Comprobando compatibilidad...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script type="module">
+// ─────────────────────────────────────────────────────────
+//  IMPORTS
+// ─────────────────────────────────────────────────────────
+let Muxer, ArrayBufferTarget;
+try {
+  const mod = await import('https://esm.sh/mp4-muxer@5');
+  Muxer = mod.Muxer;
+  ArrayBufferTarget = mod.ArrayBufferTarget;
+  setDot('dMX', true, 'mp4-muxer cargado');
+} catch(e) {
+  setDot('dMX', false, 'mp4-muxer — error CDN');
+  addLog(`Error cargando mp4-muxer: ${e.message}`, 'err');
+}
+
+// ─────────────────────────────────────────────────────────
+//  COMPAT CHECK
+// ─────────────────────────────────────────────────────────
+async function checkCompat() {
+  if (typeof VideoEncoder === 'undefined') {
+    setDot('dVC', false, 'VideoEncoder — no disponible');
+    setDot('dAC', false, 'AudioEncoder — no disponible');
+    addLog('WebCodecs no disponible en este navegador. Usa Chrome 94+.', 'err');
+    return false;
+  }
+  try {
+    const vSupport = await VideoEncoder.isConfigSupported({
+      codec: 'avc1.4d002a', width: 1280, height: 720,
+      bitrate: 8_000_000, framerate: 30
+    });
+    setDot('dVC', vSupport.supported, `VideoEncoder H.264 ${vSupport.supported ? '✓' : '✗'}`);
+
+    if (typeof AudioEncoder !== 'undefined') {
+      const aSupport = await AudioEncoder.isConfigSupported({
+        codec: 'mp4a.40.2', sampleRate: 44100, numberOfChannels: 2
+      });
+      setDot('dAC', aSupport.supported, `AudioEncoder AAC ${aSupport.supported ? '✓' : '✗'}`);
+    } else {
+      setDot('dAC', false, 'AudioEncoder — no disponible');
+    }
+    return vSupport.supported;
+  } catch(e) {
+    setDot('dVC', false, 'VideoEncoder — error');
+    addLog(`Compat error: ${e.message}`, 'err');
+    return false;
+  }
+}
+const compatible = await checkCompat();
+addLog(compatible ? 'Listo para exportar.' : 'WebCodecs no disponible.', compatible ? 'ok' : 'err');
+
+// ─────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────
+let slides = [];      // { file, img, url }
+let audioFile = null;
+let previewTimer = null;
+let previewIdx = 0;
+let isExporting = false;
+
+// ─────────────────────────────────────────────────────────
+//  DOM
+// ─────────────────────────────────────────────────────────
+const canvas = document.getElementById('previewCanvas');
+const ctx    = canvas.getContext('2d');
+const overlay    = document.getElementById('previewOverlay');
+const counter    = document.getElementById('slideCounter');
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+const thumbsCont = document.getElementById('thumbs');
+const audioDrop  = document.getElementById('audioDrop');
+const audioInput = document.getElementById('audioInput');
+const btnExport  = document.getElementById('btnExport');
+const progressTrack = document.getElementById('progressTrack');
+const progressFill  = document.getElementById('progressFill');
+const estimateEl = document.getElementById('estimate');
+const previewLabel = document.getElementById('previewLabel');
+const timingPanel  = document.getElementById('timingPanel');
+
+const rSlide = document.getElementById('rSlide');
+const rTrans = document.getElementById('rTrans');
+const sFps   = document.getElementById('sFps');
+const sRes   = document.getElementById('sRes');
+
+// ─────────────────────────────────────────────────────────
+//  IMAGES
+// ─────────────────────────────────────────────────────────
+async function loadImg(file) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload  = () => res({ file, img, url });
+    img.onerror = () => rej(new Error(`No se pudo cargar: ${file.name}`));
+    img.src = url;
+  });
+}
+
+async function addSlides(files) {
+  const valid = Array.from(files).filter(f =>
+    f.type === 'image/jpeg' || f.type === 'image/png'
+  );
+  if (!valid.length) return;
+  addLog(`Cargando ${valid.length} imagen(es)...`);
+  try {
+    const loaded = await Promise.all(valid.map(loadImg));
+    slides.push(...loaded);
+    renderThumbs();
+    startPreview();
+    updateUI();
+    addLog(`${slides.length} slide(s) cargados.`, 'ok');
+  } catch(e) {
+    addLog(`Error: ${e.message}`, 'err');
+  }
+}
+
+function removeSlide(i) {
+  URL.revokeObjectURL(slides[i].url);
+  slides.splice(i, 1);
+  renderThumbs();
+  updateUI();
+  if (slides.length) startPreview();
+  else { ctx.clearRect(0,0,canvas.width,canvas.height); showOverlay(true); }
+}
+
+function renderThumbs() {
+  thumbsCont.innerHTML = '';
+  slides.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    div.innerHTML = `<img src="${s.url}">
+      <span class="thumb-num">${i+1}</span>
+      <button class="thumb-del" data-i="${i}">×</button>`;
+    div.querySelector('.thumb-del').onclick = e => {
+      e.stopPropagation();
+      removeSlide(+e.target.dataset.i);
+    };
+    thumbsCont.appendChild(div);
+  });
+  dropZone.style.display = slides.length ? 'none' : '';
+  showOverlay(!slides.length);
+}
+
+// ─────────────────────────────────────────────────────────
+//  PREVIEW
+// ─────────────────────────────────────────────────────────
+function startPreview() {
+  if (previewTimer) clearInterval(previewTimer);
+  previewIdx = 0;
+  drawPreview(0);
+  const ms = parseFloat(rSlide.value) * 1000;
+  previewTimer = setInterval(() => {
+    previewIdx = (previewIdx + 1) % slides.length;
+    drawPreview(0);
+  }, ms);
+}
+
+function drawPreview(alpha2, nextIdx) {
+  if (!slides.length) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (nextIdx !== undefined && alpha2 > 0) {
+    ctx.globalAlpha = 1 - alpha2;
+    drawCover(ctx, slides[previewIdx].img);
+    ctx.globalAlpha = alpha2;
+    drawCover(ctx, slides[nextIdx].img);
+    ctx.globalAlpha = 1;
+  } else {
+    drawCover(ctx, slides[previewIdx].img);
+  }
+  counter.textContent = `${previewIdx + 1} / ${slides.length}`;
+  counter.style.display = '';
+  previewLabel.textContent = `${previewIdx + 1} de ${slides.length}`;
+}
+
+function showOverlay(show) {
+  overlay.classList.toggle('hidden', !show);
+}
+
+// ─────────────────────────────────────────────────────────
+//  DRAG & DROP
+// ─────────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => addSlides(e.target.files));
+
+['dragenter','dragover'].forEach(ev => {
+  document.addEventListener(ev, e => e.preventDefault());
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('over'); });
+});
+['dragleave','drop'].forEach(ev => {
+  dropZone.addEventListener(ev, () => dropZone.classList.remove('over'));
+});
+dropZone.addEventListener('drop', e => { e.preventDefault(); addSlides(e.dataTransfer.files); });
+
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const imgs = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  const auds = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
+  if (imgs.length) addSlides(imgs);
+  if (auds.length) setAudio(auds[0]);
+});
+document.addEventListener('dragover', e => e.preventDefault());
+
+// ─────────────────────────────────────────────────────────
+//  AUDIO
+// ─────────────────────────────────────────────────────────
+audioDrop.addEventListener('click', () => audioInput.click());
+audioInput.addEventListener('change', e => { if (e.target.files[0]) setAudio(e.target.files[0]); });
+
+function setAudio(f) {
+  audioFile = f;
+  audioDrop.textContent = `🎵 ${f.name}`;
+  audioDrop.classList.add('loaded');
+  addLog(`Audio: ${f.name} (${(f.size/1024).toFixed(0)} KB)`);
+  updateUI();
+}
+
+// ─────────────────────────────────────────────────────────
+//  SETTINGS
+// ─────────────────────────────────────────────────────────
+rSlide.addEventListener('input', () => {
+  document.getElementById('vSlide').textContent = `${(+rSlide.value).toFixed(1)}s`;
+  updateUI();
+  if (slides.length) startPreview();
+});
+rTrans.addEventListener('input', () => {
+  document.getElementById('vTrans').textContent = `${(+rTrans.value).toFixed(1)}s`;
+  updateUI();
+});
+sFps.addEventListener('change', updateUI);
+sRes.addEventListener('change', updateUI);
+
+function updateUI() {
+  btnExport.disabled = !slides.length || isExporting || !compatible;
+  // Estimate
+  if (!slides.length) { estimateEl.textContent = '—'; return; }
+  const fps = +sFps.value;
+  const dur = slides.length * +rSlide.value;
+  const br  = 8_000_000 + (audioFile ? 128_000 : 0);
+  const mb  = (br * dur / 8 / 1024 / 1024).toFixed(1);
+  estimateEl.textContent = `~${mb} MB · ${dur.toFixed(1)}s · ${fps} fps`;
+}
+
+// ─────────────────────────────────────────────────────────
+//  EXPORT
+// ─────────────────────────────────────────────────────────
+btnExport.addEventListener('click', runExport);
+
+async function runExport() {
+  if (!slides.length || isExporting || !compatible) return;
+  isExporting = true;
+  btnExport.disabled = true;
+  progressTrack.style.display = 'block';
+  timingPanel.style.display = 'none';
+  setProgress(0);
+
+  const FPS          = +sFps.value;
+  const slideDur     = +rSlide.value;
+  const transDur     = Math.min(+rTrans.value, slideDur * 0.8);
+  const [W, H]       = sRes.value.split('x').map(Number);
+  const totalDur     = slides.length * slideDur;
+  const totalFrames  = Math.ceil(totalDur * FPS);
+
+  addLog(`─── Exportación iniciada ───`);
+  addLog(`${slides.length} slides · ${totalDur.toFixed(1)}s · ${totalFrames} frames · ${W}×${H}@${FPS}`);
+
+  const t0 = performance.now();
+
+  try {
+    // Offscreen canvas
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const offCtx = off.getContext('2d');
+
+    // Decode audio if present
+    let audioBuffer = null;
+    if (audioFile) {
+      addLog('Decodificando audio...');
+      const ac = new AudioContext();
+      const ab = await audioFile.arrayBuffer();
+      audioBuffer = await ac.decodeAudioData(ab);
+      ac.close();
+      addLog(`Audio: ${audioBuffer.numberOfChannels}ch · ${audioBuffer.sampleRate}Hz · ${audioBuffer.duration.toFixed(1)}s`);
+    }
+
+    // Muxer
+    const muxCfg = {
+      target: new ArrayBufferTarget(),
+      video: { codec: 'avc', width: W, height: H },
+      fastStart: 'in-memory'
+    };
+    if (audioBuffer) {
+      muxCfg.audio = {
+        codec: 'aac',
+        numberOfChannels: audioBuffer.numberOfChannels,
+        sampleRate: audioBuffer.sampleRate
+      };
+    }
+    const muxer = new Muxer(muxCfg);
+
+    // VideoEncoder — find best supported codec
+    const codec = await getBestVideoCodec(W, H);
+    addLog(`Codec: ${codec}`);
+
+    const videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: e => { throw e; }
+    });
+    videoEncoder.configure({
+      codec, width: W, height: H,
+      bitrate: 8_000_000, framerate: FPS,
+      hardwareAcceleration: 'prefer-hardware',
+      latencyMode: 'quality'
+    });
+
+    // ── Video frame loop ───────────────────────────────
+    const tVideo = performance.now();
+    for (let fi = 0; fi < totalFrames; fi++) {
+      const t      = fi / FPS;
+      const si     = Math.min(Math.floor(t / slideDur), slides.length - 1);
+      const tSlide = t - si * slideDur;
+      const tStart = slideDur - transDur;
+      const inTrans = transDur > 0 && tSlide >= tStart && si < slides.length - 1;
+
+      offCtx.clearRect(0, 0, W, H);
+      if (inTrans) {
+        const a = (tSlide - tStart) / transDur;
+        offCtx.globalAlpha = 1 - a;
+        drawCoverCtx(offCtx, slides[si].img, W, H);
+        offCtx.globalAlpha = a;
+        drawCoverCtx(offCtx, slides[si + 1].img, W, H);
+        offCtx.globalAlpha = 1;
+      } else {
+        drawCoverCtx(offCtx, slides[si].img, W, H);
+      }
+
+      const ts = Math.round(fi * 1_000_000 / FPS);
+      const vf = new VideoFrame(off, { timestamp: ts });
+      videoEncoder.encode(vf, { keyFrame: fi % (FPS * 2) === 0 });
+      vf.close();
+
+      setProgress((fi + 1) / totalFrames * (audioBuffer ? 65 : 90));
+
+      if (fi % 15 === 0) await tick();
+      if (videoEncoder.encodeQueueSize > 30) await sleep(5);
+    }
+    await videoEncoder.flush();
+    videoEncoder.close();
+
+    const videoMs = performance.now() - tVideo;
+    addLog(`Video: ${(videoMs/1000).toFixed(2)}s · ${(totalFrames/(videoMs/1000)).toFixed(0)} fps reales`, 'ok');
+
+    // ── Audio ─────────────────────────────────────────
+    if (audioBuffer) {
+      addLog('Codificando audio AAC...');
+      await encodeAudio(audioBuffer, totalDur, muxer);
+      addLog('Audio codificado.', 'ok');
+    }
+
+    setProgress(95);
+
+    // ── Finalize ──────────────────────────────────────
+    muxer.finalize();
+    const { buffer } = muxer.target;
+    const sizeMB = (buffer.byteLength / 1024 / 1024).toFixed(2);
+
+    addLog(`Archivo: ${sizeMB} MB`, 'ok');
+    setProgress(100);
+
+    // Download
+    const blob = new Blob([buffer], { type: 'video/mp4' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'sequentia-poc1.mp4'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    addLog('✓ Descarga iniciada.', 'ok');
+
+    // Show timing results
+    const totalMs = performance.now() - t0;
+    const videoSec = totalMs / 1000;
+    showTimings(videoSec, totalFrames, +sizeMB, totalDur);
+
+  } catch(e) {
+    addLog(`✗ ${e.message}`, 'err');
+    console.error(e);
+    btnExport.textContent = '✗ Error — Reintentar';
+  } finally {
+    isExporting = false;
+    progressTrack.style.display = 'none';
+    setTimeout(() => {
+      btnExport.textContent = 'Exportar MP4';
+      btnExport.disabled = !slides.length;
+    }, 3000);
+  }
+}
+
+async function encodeAudio(audioBuffer, videoDur, muxer) {
+  return new Promise((resolve, reject) => {
+    const ae = new AudioEncoder({
+      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      error: reject
+    });
+    ae.configure({
+      codec: 'mp4a.40.2',
+      sampleRate: audioBuffer.sampleRate,
+      numberOfChannels: audioBuffer.numberOfChannels,
+      bitrate: 128_000
+    });
+
+    const SR   = audioBuffer.sampleRate;
+    const NCH  = audioBuffer.numberOfChannels;
+    const CHUNK = 1024;
+    const maxS  = Math.min(audioBuffer.length, Math.ceil(videoDur * SR));
+    const chData = Array.from({length: NCH}, (_, c) => audioBuffer.getChannelData(c));
+
+    for (let i = 0; i < maxS; i += CHUNK) {
+      const n  = Math.min(CHUNK, maxS - i);
+      const ts = Math.round(i / SR * 1_000_000);
+      // f32-planar: ch0 samples followed by ch1 samples
+      const data = new Float32Array(n * NCH);
+      for (let c = 0; c < NCH; c++) {
+        data.set(chData[c].subarray(i, i + n), c * n);
+      }
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: SR, numberOfChannels: NCH, numberOfFrames: n, timestamp: ts, data });
+      ae.encode(ad);
+      ad.close();
+    }
+    ae.flush().then(() => { ae.close(); resolve(); }).catch(reject);
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────────────────
+async function getBestVideoCodec(w, h) {
+  for (const codec of ['avc1.4d002a','avc1.4d001f','avc1.42001f','avc1.420034']) {
+    const s = await VideoEncoder.isConfigSupported({ codec, width: w, height: h, bitrate: 8_000_000, framerate: 30 });
+    if (s.supported) return codec;
+  }
+  throw new Error('Ningún codec H.264 soportado en este dispositivo');
+}
+
+function drawCover(ctx, img) { drawCoverCtx(ctx, img, canvas.width, canvas.height); }
+function drawCoverCtx(ctx, img, w, h) {
+  const s  = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+  const sw = img.naturalWidth * s, sh = img.naturalHeight * s;
+  ctx.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh);
+}
+
+function setProgress(pct) {
+  progressFill.style.width = `${pct}%`;
+  btnExport.textContent = `Exportando ${Math.round(pct)}%`;
+}
+
+function addLog(msg, type) {
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = type ? `line-${type}` : '';
+  div.textContent = `> ${msg}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setDot(id, ok, label) {
+  const dot = document.getElementById(id);
+  if (!dot) return;
+  dot.className = `dot ${ok ? 'green' : 'red'}`;
+  const lbl = document.getElementById(id.replace('d', 'l'));
+  if (lbl && label) lbl.textContent = label;
+}
+
+function showTimings(totalSec, frames, sizeMB, videoDur) {
+  document.getElementById('tTime').textContent = `${totalSec.toFixed(1)}s`;
+  document.getElementById('tSpeed').textContent = `${(frames / totalSec).toFixed(0)}f/s`;
+  document.getElementById('tSize').textContent = `${sizeMB} MB`;
+  document.getElementById('tRatio').textContent = `${(videoDur / totalSec).toFixed(1)}×`;
+  timingPanel.style.display = '';
+}
+
+const tick  = () => new Promise(r => setTimeout(r, 0));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+</script>
+</body>
+</html>
