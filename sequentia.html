@@ -264,6 +264,35 @@
                    color: white; font-size: 10px; font-family: var(--mono); padding: 1px 4px;
                    border-radius: 3px; font-weight: 700; }
 
+    .thumb-edit {
+      position: absolute; bottom: 4px; left: 4px;
+      background: rgba(0,0,0,0.6); color: var(--text);
+      border: none; border-radius: 3px; width: 20px; height: 20px;
+      cursor: pointer; font-size: 12px; line-height: 1; display: none;
+    }
+    .thumb:hover .thumb-edit { display: flex; align-items: center; justify-content: center; }
+
+    .override-panel {
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px 12px; margin-bottom: 6px;
+      display: none; /* oculto por defecto */
+    }
+    .override-panel.open { display: block; }
+
+    .ov-row { display: flex; align-items: center; justify-content: space-between;
+              gap: 8px; margin-bottom: 8px; font-size: 12px; }
+    .ov-row:last-child { margin-bottom: 0; }
+    .ov-label { color: var(--muted); flex-shrink: 0; }
+    .ov-clear { width: 100%; margin-top: 8px; padding: 6px; background: none;
+                border: 1px solid var(--red); color: var(--red); border-radius: 4px;
+                cursor: pointer; font-size: 12px; font-family: var(--sans); }
+    .ov-clear:hover { background: var(--red); color: white; }
+
+    /* Badge de override en miniatura */
+    .thumb-badge-ov { position: absolute; bottom: 4px; right: 28px;
+                      background: var(--accent); color: white; font-size: 10px;
+                      font-family: var(--mono); padding: 1px 4px; border-radius: 3px; }
+
     /* Panel central */
     #panelCenter { display: flex; flex-direction: column; overflow: hidden; }
     #previewArea { display: flex; flex-direction: column; align-items: center; padding: 16px; gap: 12px; flex-shrink: 0; }
@@ -664,8 +693,34 @@
           thumb.appendChild(badge);
         }
 
+        // Override badge
+        const ov = slide.overrides || {};
+        const hasOverrides = ov.duration || ov.transition || ov.transitionDuration || ov.textMode === 'own';
+        if (hasOverrides) {
+          const badge = document.createElement('span');
+          badge.className = 'thumb-badge-ov';
+          badge.textContent = ov.duration ? `${ov.duration}s` : '✎';
+          badge.title = 'Este slide tiene overrides';
+          thumb.appendChild(badge);
+        }
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'thumb-edit';
+        editBtn.textContent = '✎';
+        editBtn.title = 'Overrides de este slide';
+        editBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          toggleOverridePanel(slide.id);
+        });
+        thumb.appendChild(editBtn);
+
         thumb.appendChild(del);
         list.appendChild(thumb);
+
+        // Override panel (inline, after thumb)
+        const overrideEl = buildOverridePanel(slide);
+        list.appendChild(overrideEl);
 
         thumb.addEventListener('click', e => {
           if (e.target === del) return;
@@ -922,7 +977,12 @@
     }
 
     function getEffectiveTransition(slide) {
-      return slide?.overrides?.transition ?? state.config.transition;
+      if (slide?.overrides?.transition) return slide.overrides.transition;
+      const base = state.config.transition;
+      if ((base === 'slide' || base === 'wipe') && state.config.transitionDir) {
+        return state.config.transitionDir; // ya incluye dirección: 'slide-left', 'wipe-right', etc.
+      }
+      return base;
     }
 
     function goToSlide(index) {
@@ -1639,6 +1699,88 @@
       dot.style.background = supported ? 'var(--green)' : 'var(--red)';
       label.textContent = supported ? 'Listo para exportar' : 'Requiere Chrome o Edge';
       document.getElementById('btnExport').disabled = !supported || state.slides.length === 0;
+    }
+
+    // ── Task 8: Slide Override Panel ─────────────────────────────────
+
+    function buildOverridePanel(slide) {
+      const panel = document.createElement('div');
+      panel.className = 'override-panel';
+      panel.id = 'override-' + slide.id;
+
+      const ov = slide.overrides || {};
+
+      panel.innerHTML = `
+        <div class="ov-row">
+          <span class="ov-label">Duración <span style="color:var(--text);font-family:var(--mono)">(global: ${state.config.slideDuration}s)</span></span>
+          <input type="number" class="cfg-input ov-duration" style="width:64px"
+                 step="0.1" min="0.1" value="${ov.duration ?? ''}" placeholder="–">
+        </div>
+        <div class="ov-row">
+          <span class="ov-label">Transición</span>
+          <select class="ov-transition" style="background:var(--s3);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;font-family:var(--sans)">
+            <option value="">Global (${state.config.transition})</option>
+            ${['fade','slide-left','slide-right','slide-up','slide-down',
+               'zoom-punch','wipe-left','wipe-right','wipe-up','wipe-down',
+               'cross-zoom','flash','random'].map(t =>
+              `<option value="${t}"${ov.transition === t ? ' selected' : ''}>${t}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="ov-row">
+          <span class="ov-label">Dur. transición <span style="color:var(--text);font-family:var(--mono)">(global: ${state.config.transitionDuration}s)</span></span>
+          <input type="number" class="cfg-input ov-trans-duration" style="width:64px"
+                 step="0.1" min="0" value="${ov.transitionDuration ?? ''}" placeholder="–">
+        </div>
+        <button class="ov-clear">Eliminar todos los overrides</button>
+      `;
+
+      // Duración
+      panel.querySelector('.ov-duration').addEventListener('change', e => {
+        const val = parseFloat(e.target.value);
+        slide.overrides.duration = isNaN(val) || val <= 0 ? null : val;
+        if (!slide.overrides.duration) e.target.value = '';
+        renderThumbs();
+        saveProject(state);
+      });
+
+      // Transición
+      panel.querySelector('.ov-transition').addEventListener('change', e => {
+        slide.overrides.transition = e.target.value || null;
+        renderThumbs();
+        saveProject(state);
+      });
+
+      // Duración de transición individual
+      panel.querySelector('.ov-trans-duration').addEventListener('change', e => {
+        const val = parseFloat(e.target.value);
+        slide.overrides.transitionDuration = isNaN(val) || val < 0 ? null : val;
+        if (slide.overrides.transitionDuration === null) e.target.value = '';
+        saveProject(state);
+      });
+
+      // Botón limpiar
+      panel.querySelector('.ov-clear').addEventListener('click', () => {
+        const ov = slide.overrides;
+        const items = [
+          ov.duration && `duración (${ov.duration}s)`,
+          ov.transition && `transición (${ov.transition})`,
+          ov.textMode === 'own' && 'texto propio',
+        ].filter(Boolean);
+        if (items.length === 0 || confirm(`Eliminar overrides: ${items.join(', ')}?`)) {
+          slide.overrides = {};
+          renderThumbs();
+          saveProject(state);
+        }
+      });
+
+      return panel;
+    }
+
+    function toggleOverridePanel(slideId) {
+      const panel = document.getElementById('override-' + slideId);
+      if (!panel) return;
+      panel.classList.toggle('open');
     }
 
     // ── Init ─────────────────────────────────────────────────────────
