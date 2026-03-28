@@ -771,6 +771,12 @@
         });
       });
 
+      // Restaurar panel de override si estaba abierto
+      if (_openOverrideId) {
+        const panel = document.getElementById('override-' + _openOverrideId);
+        if (panel) panel.classList.add('open');
+      }
+
       updateEmptyState();
       updatePlayControls();
     }
@@ -966,6 +972,7 @@
 
     let _rafId = null;
     let _webCodecsSupported = typeof VideoEncoder !== 'undefined';
+    let _openOverrideId = null; // id del slide cuyo override panel está abierto
     let _lastTime = null;
     let _slideElapsed = 0;   // segundos transcurridos en el slide actual
     let _transElapsed = 0;   // segundos en la transición
@@ -1769,6 +1776,7 @@
         ].filter(Boolean);
         if (items.length === 0 || confirm(`Eliminar overrides: ${items.join(', ')}?`)) {
           slide.overrides = {};
+          _openOverrideId = null;
           renderThumbs();
           saveProject(state);
         }
@@ -1778,9 +1786,21 @@
     }
 
     function toggleOverridePanel(slideId) {
-      const panel = document.getElementById('override-' + slideId);
-      if (!panel) return;
-      panel.classList.toggle('open');
+      if (_openOverrideId === slideId) {
+        // Cerrar el actual
+        const panel = document.getElementById('override-' + slideId);
+        if (panel) panel.classList.remove('open');
+        _openOverrideId = null;
+      } else {
+        // Cerrar el anterior si hay uno
+        if (_openOverrideId) {
+          const prev = document.getElementById('override-' + _openOverrideId);
+          if (prev) prev.classList.remove('open');
+        }
+        _openOverrideId = slideId;
+        const panel = document.getElementById('override-' + slideId);
+        if (panel) panel.classList.add('open');
+      }
     }
 
     // ── Init ─────────────────────────────────────────────────────────
