@@ -233,6 +233,45 @@
       from { opacity: 1; transform: translateX(0); }
       to   { opacity: 0; transform: translateX(20px); }
     }
+
+    /* Thumbnail panel */
+    #panelRight { display: flex; flex-direction: column; }
+    #thumbList { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    #emptyState { display: flex; flex-direction: column; align-items: center; justify-content: center;
+                  gap: 12px; padding: 40px 16px; color: var(--muted); text-align: center; font-size: 13px; }
+    .panel-footer { padding: 10px 8px; border-top: 1px solid var(--border); }
+    #btnAddImages { width: 100%; padding: 8px; background: var(--s3); color: var(--text);
+                    border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 13px;
+                    font-family: var(--sans); }
+    #btnAddImages:hover { background: var(--accent); border-color: var(--accent); }
+
+    /* Thumbnails */
+    :root { --canvas-ratio: 16/9; }
+    .thumb { position: relative; width: 100%; aspect-ratio: var(--canvas-ratio);
+             border: 2px solid transparent; border-radius: 6px; overflow: hidden; cursor: pointer;
+             background: var(--s3); }
+    .thumb:hover { border-color: var(--border); }
+    .thumb.selected { border-color: var(--accent); }
+    .thumb.drag-over { border-color: var(--accent2); opacity: 0.6; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb-num { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.6);
+                 color: var(--text); font-size: 11px; font-family: var(--mono);
+                 padding: 2px 5px; border-radius: 3px; line-height: 1; }
+    .thumb-delete { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.6);
+                    color: var(--text); border: none; border-radius: 3px; width: 20px; height: 20px;
+                    cursor: pointer; font-size: 14px; line-height: 1; display: none; }
+    .thumb:hover .thumb-delete { display: flex; align-items: center; justify-content: center; }
+    .thumb-badge { position: absolute; bottom: 4px; right: 4px; background: var(--red);
+                   color: white; font-size: 10px; font-family: var(--mono); padding: 1px 4px;
+                   border-radius: 3px; font-weight: 700; }
+
+    /* Context menu */
+    #contextMenu { position: fixed; background: var(--s2); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 4px; z-index: 1000; min-width: 160px; }
+    #contextMenu button { display: block; width: 100%; padding: 8px 12px; background: none;
+                          border: none; color: var(--text); font-size: 13px; font-family: var(--sans);
+                          text-align: left; cursor: pointer; border-radius: 4px; }
+    #contextMenu button:hover { background: var(--s3); }
   </style>
 </head>
 <body>
@@ -255,7 +294,20 @@
 
   <div id="app">
     <div id="panelCenter"><!-- preview + config, Tasks 4+ --></div>
-    <div id="panelRight"><!-- thumbnails, Task 3 --></div>
+    <div id="panelRight">
+      <div id="thumbList">
+        <div id="emptyState">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <p>Arrastra imágenes JPG / PNG aquí</p>
+        </div>
+      </div>
+      <div class="panel-footer">
+        <button id="btnAddImages">+ Añadir imágenes</button>
+      </div>
+    </div>
   </div>
 
   <div id="toastContainer"></div>
@@ -264,6 +316,25 @@
 
   <script type="module">
     // Tasks 2+ aquí
+
+    // ── Task 3: State ────────────────────────────────────────────────
+    const state = {
+      slides: [],
+      config: {
+        aspectRatio: '16:9', customW: 1920, customH: 1080,
+        resolution: '1080p', fitMode: 'contain',
+        bgBlur: 0, bgColor: '#000000', bgImageId: null, bgImageBlur: 0,
+        slideDuration: 3.0, transitionDuration: 0.5,
+        transition: 'fade',
+        fps: 30, quality: 'medium', filename: 'sequentia',
+        loop: false,
+        watermark: null, frame: null, vignette: 0, vignetteColor: '#000000',
+        globalText: null,
+        audio: null,
+      },
+      currentIndex: 0,
+      playing: false,
+    };
 
     // ── Task 2: IndexedDB Storage Layer ─────────────────────────────
 
@@ -344,6 +415,217 @@
       return await dbGet('project', 'main');
     }
 
+    // ── Task 3: Toast ────────────────────────────────────────────────
+
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = msg;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('toast-out');
+        toast.addEventListener('animationend', () => toast.remove(), { once: true });
+      }, 3000);
+    }
+
+    // ── Task 3: Image Functions ──────────────────────────────────────
+
+    async function addImages(files) {
+      const valid = [...files]
+        .filter(f => {
+          const ok = ['image/jpeg', 'image/png'].includes(f.type);
+          if (!ok) showToast('Formato no soportado: ' + f.name.split('.').pop().toUpperCase(), 'error');
+          return ok;
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const file of valid) {
+        const blob = file;
+        const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+        const id = crypto.randomUUID();
+        const slide = {
+          id,
+          name: file.name,
+          width: bitmap.width,
+          height: bitmap.height,
+          blobUrl: URL.createObjectURL(blob),
+          overrides: {},
+        };
+        bitmap.close();
+        await dbPut('images', { id, blob, name: file.name, width: slide.width, height: slide.height });
+        state.slides.push(slide);
+      }
+
+      renderThumbs();
+      await saveProject(state);
+    }
+
+    function removeSlide(id) {
+      const idx = state.slides.findIndex(s => s.id === id);
+      if (idx === -1) return;
+      const slide = state.slides[idx];
+      URL.revokeObjectURL(slide.blobUrl);
+      dbDelete('images', id);
+      state.slides.splice(idx, 1);
+      if (state.currentIndex >= state.slides.length) {
+        state.currentIndex = Math.max(0, state.slides.length - 1);
+      }
+      renderThumbs();
+      saveProject(state);
+    }
+
+    // ── Task 3: renderThumbs ─────────────────────────────────────────
+
+    function getCanvasRes() {
+      return state.config.resolution === '720p' ? { w: 1280, h: 720 } : { w: 1920, h: 1080 };
+    }
+
+    function renderThumbs() {
+      const list = document.getElementById('thumbList');
+      const empty = document.getElementById('emptyState');
+
+      const ratios = { '16:9': '16/9', '9:16': '9/16', '1:1': '1/1', '4:3': '4/3', '4:5': '4/5', '21:9': '21/9' };
+      document.documentElement.style.setProperty('--canvas-ratio', ratios[state.config.aspectRatio] || '16/9');
+
+      if (state.slides.length === 0) {
+        list.innerHTML = '';
+        list.appendChild(empty);
+        return;
+      }
+
+      empty.remove();
+
+      const res = getCanvasRes();
+
+      list.innerHTML = '';
+      state.slides.forEach((slide, i) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'thumb' + (i === state.currentIndex ? ' selected' : '');
+        thumb.dataset.id = slide.id;
+        thumb.draggable = true;
+
+        const img = document.createElement('img');
+        img.src = slide.blobUrl;
+        img.loading = 'lazy';
+
+        const num = document.createElement('span');
+        num.className = 'thumb-num';
+        num.textContent = i + 1;
+
+        const del = document.createElement('button');
+        del.className = 'thumb-delete';
+        del.textContent = '×';
+        del.title = 'Eliminar';
+
+        thumb.appendChild(img);
+        thumb.appendChild(num);
+
+        if (slide.width < res.w || slide.height < res.h) {
+          const badge = document.createElement('span');
+          badge.className = 'thumb-badge';
+          badge.textContent = '!';
+          badge.title = `Resolución baja: ${slide.width}×${slide.height} < ${res.w}×${res.h}`;
+          thumb.appendChild(badge);
+        }
+
+        thumb.appendChild(del);
+        list.appendChild(thumb);
+
+        thumb.addEventListener('click', e => {
+          if (e.target === del) return;
+          state.currentIndex = i;
+          renderThumbs();
+        });
+
+        del.addEventListener('click', e => {
+          e.stopPropagation();
+          const ov = slide.overrides;
+          const items = [
+            ov.duration && `duración (${ov.duration}s)`,
+            ov.transition && `transición (${ov.transition})`,
+            ov.textMode === 'own' && 'texto propio',
+          ].filter(Boolean);
+          if (items.length === 0 || confirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
+            removeSlide(slide.id);
+          }
+        });
+
+        thumb.addEventListener('dragstart', e => {
+          e.dataTransfer.setData('text/plain', slide.id);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        thumb.addEventListener('dragover', e => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          document.querySelectorAll('.thumb.drag-over').forEach(el => el.classList.remove('drag-over'));
+          thumb.classList.add('drag-over');
+        });
+        thumb.addEventListener('dragleave', () => thumb.classList.remove('drag-over'));
+        thumb.addEventListener('drop', e => {
+          e.preventDefault();
+          thumb.classList.remove('drag-over');
+          const fromId = e.dataTransfer.getData('text/plain');
+          const fromIdx = state.slides.findIndex(s => s.id === fromId);
+          const toIdx = i;
+          if (fromIdx === -1 || fromIdx === toIdx) return;
+          const [moved] = state.slides.splice(fromIdx, 1);
+          state.slides.splice(toIdx, 0, moved);
+          renderThumbs();
+          saveProject(state);
+        });
+
+        thumb.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          showContextMenu(e.clientX, e.clientY, slide);
+        });
+      });
+    }
+
+    // ── Task 3: Context Menu ─────────────────────────────────────────
+
+    function showContextMenu(x, y, slide) {
+      let menu = document.getElementById('contextMenu');
+      if (menu) menu.remove();
+      menu = document.createElement('div');
+      menu.id = 'contextMenu';
+
+      const replaceBtn = document.createElement('button');
+      replaceBtn.textContent = 'Reemplazar imagen';
+      replaceBtn.addEventListener('click', () => {
+        menu.remove();
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/jpeg,image/png';
+        input.addEventListener('change', async () => {
+          if (!input.files[0]) return;
+          const file = input.files[0];
+          if (!['image/jpeg', 'image/png'].includes(file.type)) {
+            showToast('Formato no soportado: ' + file.name.split('.').pop().toUpperCase(), 'error');
+            return;
+          }
+          const blob = file;
+          const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+          URL.revokeObjectURL(slide.blobUrl);
+          slide.blobUrl = URL.createObjectURL(blob);
+          slide.name = file.name;
+          slide.width = bitmap.width;
+          slide.height = bitmap.height;
+          bitmap.close();
+          await dbPut('images', { id: slide.id, blob, name: file.name, width: slide.width, height: slide.height });
+          renderThumbs();
+          await saveProject(state);
+        });
+        input.click();
+      });
+
+      menu.appendChild(replaceBtn);
+      document.body.appendChild(menu);
+      menu.style.left = Math.min(x, window.innerWidth - 170) + 'px';
+      menu.style.top = Math.min(y, window.innerHeight - 60) + 'px';
+      document.addEventListener('click', () => menu.remove(), { once: true });
+    }
+
     // ── Init ─────────────────────────────────────────────────────────
 
     async function main() {
@@ -352,7 +634,32 @@
         console.error('IndexedDB no disponible');
         return;
       }
-      // Tasks futuras: loadProject(), renderThumbs(), etc.
+
+      // Task 3: Event listeners — image loading
+      document.getElementById('btnAddImages').addEventListener('click', () => {
+        document.getElementById('fileInput').click();
+      });
+      document.getElementById('fileInput').addEventListener('change', e => {
+        if (e.target.files.length > 0) addImages(e.target.files);
+        e.target.value = '';
+      });
+
+      ['thumbList', 'panelCenter'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('dragover', e => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          }
+        });
+        el.addEventListener('drop', e => {
+          if (e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            addImages(e.dataTransfer.files);
+          }
+        });
+      });
     }
 
     main();
