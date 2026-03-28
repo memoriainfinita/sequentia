@@ -966,20 +966,41 @@
         ctx.drawImage(slide._bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
       }
 
-      // 4. Vignette
-      if (cfg.vignette > 0) {
-        const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
-        grad.addColorStop(0, 'transparent');
-        const alpha = Math.round(cfg.vignette * 255).toString(16).padStart(2, '0');
-        grad.addColorStop(1, (cfg.vignetteColor || '#000000') + alpha);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-      }
+      // 4. Global overlays (frame, watermark, vignette)
+      drawGlobalOverlays(ctx, w, h);
 
       // 5. Text overlay
       const textObj = getEffectiveText(slide);
       const slideDur = getEffectiveDuration(slide);
       if (textObj) drawTextOverlay(ctx, textObj, t, w, h, slideDur);
+    }
+
+    // ── Task 10: Global Overlays ─────────────────────────────────────
+
+    function drawGlobalOverlays(ctx, w, h) {
+      const { watermark, frame, vignette, vignetteColor } = state.config;
+      // Frame — stretched to fill canvas
+      if (frame?.img) {
+        ctx.globalAlpha = frame.opacity ?? 1;
+        ctx.drawImage(frame.img, 0, 0, w, h);
+        ctx.globalAlpha = 1;
+      }
+      // Watermark — centered on normalized x/y
+      if (watermark?.img) {
+        const ww = w * (watermark.scale ?? 0.2);
+        const wh = ww * (watermark.img.height / watermark.img.width);
+        ctx.globalAlpha = watermark.opacity ?? 1;
+        ctx.drawImage(watermark.img, (watermark.x ?? 0.5) * w - ww / 2, (watermark.y ?? 0.5) * h - wh / 2, ww, wh);
+        ctx.globalAlpha = 1;
+      }
+      // Vignette
+      if (vignette > 0) {
+        const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(1, (vignetteColor || '#000000') + Math.round(vignette * 255).toString(16).padStart(2, '0'));
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      }
     }
 
     function renderFrame(t = 0) {
@@ -1708,8 +1729,92 @@
       textoBody.appendChild(textControls);
       container.appendChild(textoSection);
 
+      // --- SECCIÓN OVERLAYS GLOBALES ---
+      const overlaysSection = collapsibleSection('overlays', 'Overlays Globales', '');
+      const overlaysBody = overlaysSection.querySelector('.section-body');
+
+      // Marca de agua
+      const wmDiv = document.createElement('div');
+      wmDiv.className = 'ov-subsection';
+      wmDiv.innerHTML = `
+        <div class="cfg-row" style="margin-bottom:8px">
+          <span class="cfg-label" style="font-weight:500;color:var(--text)">Marca de agua</span>
+        </div>
+        <div class="cfg-row" id="rowWmButtons">
+          <button class="btn-ghost" id="btnUploadWatermark" style="font-size:12px;padding:5px 10px">Subir PNG</button>
+          <button class="btn-ghost" id="btnRemoveWatermark" style="font-size:12px;padding:5px 10px;display:${state.config.watermark ? 'inline-flex' : 'none'}">Quitar</button>
+        </div>
+        <div id="rowWmControls" style="display:${state.config.watermark ? 'block' : 'none'}">
+          <div class="cfg-row">
+            <span class="cfg-label">Escala <span class="cfg-value" id="lblWmScale">${((state.config.watermark?.scale ?? 0.2) * 100).toFixed(0)}%</span></span>
+            <input type="range" id="sliderWmScale" min="0.05" max="1" step="0.01" value="${state.config.watermark?.scale ?? 0.2}">
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-label">Opacidad <span class="cfg-value" id="lblWmOpacity">${(state.config.watermark?.opacity ?? 1).toFixed(2)}</span></span>
+            <input type="range" id="sliderWmOpacity" min="0" max="1" step="0.05" value="${state.config.watermark?.opacity ?? 1}">
+          </div>
+        </div>
+      `;
+      overlaysBody.appendChild(wmDiv);
+
+      // Marco
+      const frameDiv = document.createElement('div');
+      frameDiv.className = 'ov-subsection';
+      frameDiv.style.borderTop = '1px solid var(--border)';
+      frameDiv.style.paddingTop = '10px';
+      frameDiv.style.marginTop = '6px';
+      frameDiv.innerHTML = `
+        <div class="cfg-row" style="margin-bottom:8px">
+          <span class="cfg-label" style="font-weight:500;color:var(--text)">Marco</span>
+        </div>
+        <div class="cfg-row" id="rowFrameButtons">
+          <button class="btn-ghost" id="btnUploadFrame" style="font-size:12px;padding:5px 10px">Subir PNG</button>
+          <button class="btn-ghost" id="btnRemoveFrame" style="font-size:12px;padding:5px 10px;display:${state.config.frame ? 'inline-flex' : 'none'}">Quitar</button>
+        </div>
+        <div id="rowFrameControls" style="display:${state.config.frame ? 'block' : 'none'}">
+          <div class="cfg-row">
+            <span class="cfg-label">Opacidad <span class="cfg-value" id="lblFrameOpacity">${(state.config.frame?.opacity ?? 1).toFixed(2)}</span></span>
+            <input type="range" id="sliderFrameOpacity" min="0" max="1" step="0.05" value="${state.config.frame?.opacity ?? 1}">
+          </div>
+        </div>
+      `;
+      overlaysBody.appendChild(frameDiv);
+
+      // Vignette
+      const vigDiv = document.createElement('div');
+      vigDiv.className = 'ov-subsection';
+      vigDiv.style.borderTop = '1px solid var(--border)';
+      vigDiv.style.paddingTop = '10px';
+      vigDiv.style.marginTop = '6px';
+      vigDiv.innerHTML = `
+        <div class="cfg-row" style="margin-bottom:8px">
+          <span class="cfg-label" style="font-weight:500;color:var(--text)">Viñeta</span>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Intensidad <span class="cfg-value" id="lblVignette">${(state.config.vignette ?? 0).toFixed(2)}</span></span>
+          <input type="range" id="sliderVignette" min="0" max="1" step="0.05" value="${state.config.vignette ?? 0}">
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Color</span>
+          <input type="color" id="pickVignetteColor" value="${state.config.vignetteColor ?? '#000000'}">
+        </div>
+      `;
+      overlaysBody.appendChild(vigDiv);
+
+      container.appendChild(overlaysSection);
+
+      // Hidden file inputs for overlay uploads
+      const wmInput = document.createElement('input');
+      wmInput.type = 'file'; wmInput.accept = 'image/png'; wmInput.style.display = 'none'; wmInput.id = 'fileWatermark';
+      document.body.appendChild(wmInput);
+
+      const frameInput = document.createElement('input');
+      frameInput.type = 'file'; frameInput.accept = 'image/png'; frameInput.style.display = 'none'; frameInput.id = 'fileFrame';
+      document.body.appendChild(frameInput);
+
       // Montar event listeners de los paneles
       bindConfigPanelEvents();
+      bindOverlayEvents();
       renderPresets();
       updateTransitionOpts();
       checkWebCodecsSupport();
@@ -1856,6 +1961,160 @@
         e.target.value = state.config.filename;
         saveProject(state);
       });
+    }
+
+    // ── Task 10: Overlay event bindings ─────────────────────────────
+
+    async function loadOverlayImage(blobUrl) {
+      return new Promise((res, rej) => {
+        const img = new Image();
+        img.onload = () => res(img);
+        img.onerror = rej;
+        img.src = blobUrl;
+      });
+    }
+
+    function bindOverlayEvents() {
+      // Watermark upload
+      document.getElementById('btnUploadWatermark').addEventListener('click', () => {
+        document.getElementById('fileWatermark').click();
+      });
+      document.getElementById('fileWatermark').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.type !== 'image/png') { showToast('La marca de agua debe ser PNG', 'error'); return; }
+        // Revoke old blobUrl if any
+        if (state.config.watermark?.blobUrl) URL.revokeObjectURL(state.config.watermark.blobUrl);
+        const blobUrl = URL.createObjectURL(file);
+        const img = await loadOverlayImage(blobUrl);
+        await dbPut('images', { id: 'watermark', blob: file, name: file.name });
+        state.config.watermark = { id: 'watermark', blobUrl, img, x: 0.5, y: 0.5, scale: 0.2, opacity: 1.0 };
+        document.getElementById('btnRemoveWatermark').style.display = 'inline-flex';
+        document.getElementById('rowWmControls').style.display = 'block';
+        document.getElementById('sliderWmScale').value = 0.2;
+        document.getElementById('lblWmScale').textContent = '20%';
+        document.getElementById('sliderWmOpacity').value = 1;
+        document.getElementById('lblWmOpacity').textContent = '1.00';
+        renderFrame();
+        saveProject(state);
+        e.target.value = '';
+      });
+
+      document.getElementById('btnRemoveWatermark').addEventListener('click', () => {
+        if (state.config.watermark?.blobUrl) URL.revokeObjectURL(state.config.watermark.blobUrl);
+        dbDelete('images', 'watermark');
+        state.config.watermark = null;
+        document.getElementById('btnRemoveWatermark').style.display = 'none';
+        document.getElementById('rowWmControls').style.display = 'none';
+        renderFrame();
+        saveProject(state);
+      });
+
+      document.getElementById('sliderWmScale').addEventListener('input', e => {
+        if (!state.config.watermark) return;
+        state.config.watermark.scale = parseFloat(e.target.value);
+        document.getElementById('lblWmScale').textContent = Math.round(state.config.watermark.scale * 100) + '%';
+        renderFrame();
+        saveProject(state);
+      });
+
+      document.getElementById('sliderWmOpacity').addEventListener('input', e => {
+        if (!state.config.watermark) return;
+        state.config.watermark.opacity = parseFloat(e.target.value);
+        document.getElementById('lblWmOpacity').textContent = state.config.watermark.opacity.toFixed(2);
+        renderFrame();
+        saveProject(state);
+      });
+
+      // Frame upload
+      document.getElementById('btnUploadFrame').addEventListener('click', () => {
+        document.getElementById('fileFrame').click();
+      });
+      document.getElementById('fileFrame').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.type !== 'image/png') { showToast('El marco debe ser PNG', 'error'); return; }
+        if (state.config.frame?.blobUrl) URL.revokeObjectURL(state.config.frame.blobUrl);
+        const blobUrl = URL.createObjectURL(file);
+        const img = await loadOverlayImage(blobUrl);
+        await dbPut('images', { id: 'frame', blob: file, name: file.name });
+        state.config.frame = { id: 'frame', blobUrl, img, opacity: 1.0 };
+        document.getElementById('btnRemoveFrame').style.display = 'inline-flex';
+        document.getElementById('rowFrameControls').style.display = 'block';
+        document.getElementById('sliderFrameOpacity').value = 1;
+        document.getElementById('lblFrameOpacity').textContent = '1.00';
+        renderFrame();
+        saveProject(state);
+        e.target.value = '';
+      });
+
+      document.getElementById('btnRemoveFrame').addEventListener('click', () => {
+        if (state.config.frame?.blobUrl) URL.revokeObjectURL(state.config.frame.blobUrl);
+        dbDelete('images', 'frame');
+        state.config.frame = null;
+        document.getElementById('btnRemoveFrame').style.display = 'none';
+        document.getElementById('rowFrameControls').style.display = 'none';
+        renderFrame();
+        saveProject(state);
+      });
+
+      document.getElementById('sliderFrameOpacity').addEventListener('input', e => {
+        if (!state.config.frame) return;
+        state.config.frame.opacity = parseFloat(e.target.value);
+        document.getElementById('lblFrameOpacity').textContent = state.config.frame.opacity.toFixed(2);
+        renderFrame();
+        saveProject(state);
+      });
+
+      // Vignette
+      document.getElementById('sliderVignette').addEventListener('input', e => {
+        state.config.vignette = parseFloat(e.target.value);
+        document.getElementById('lblVignette').textContent = state.config.vignette.toFixed(2);
+        renderFrame();
+        saveProject(state);
+      });
+
+      document.getElementById('pickVignetteColor').addEventListener('input', e => {
+        state.config.vignetteColor = e.target.value;
+        renderFrame();
+        saveProject(state);
+      });
+    }
+
+    // Restore watermark and frame img objects from IndexedDB blobs
+    async function restoreOverlayImages() {
+      // Watermark
+      if (state.config.watermark) {
+        try {
+          const rec = await dbGet('images', 'watermark');
+          if (rec?.blob) {
+            const blobUrl = URL.createObjectURL(rec.blob);
+            const img = await loadOverlayImage(blobUrl);
+            state.config.watermark.blobUrl = blobUrl;
+            state.config.watermark.img = img;
+          } else {
+            state.config.watermark = null;
+          }
+        } catch(err) {
+          state.config.watermark = null;
+        }
+      }
+      // Frame
+      if (state.config.frame) {
+        try {
+          const rec = await dbGet('images', 'frame');
+          if (rec?.blob) {
+            const blobUrl = URL.createObjectURL(rec.blob);
+            const img = await loadOverlayImage(blobUrl);
+            state.config.frame.blobUrl = blobUrl;
+            state.config.frame.img = img;
+          } else {
+            state.config.frame = null;
+          }
+        } catch(err) {
+          state.config.frame = null;
+        }
+      }
     }
 
     function renderPresets() {
@@ -2220,10 +2479,14 @@
       // Task 5: Inicializar controles
       updatePlayControls();
 
-      // Task 9: Drag text overlay on preview canvas
-      (function setupTextDrag() {
+      // Task 10: Restore overlay images from IndexedDB if present in state.config
+      await restoreOverlayImages();
+
+      // Task 9 + Task 10: Drag text overlay and watermark on preview canvas
+      (function setupCanvasDrag() {
         const canvas = document.getElementById('previewCanvas');
-        let dragging = false;
+        // dragMode: null | 'text' | 'watermark'
+        let dragMode = null;
 
         function getTextObjForCurrentSlide() {
           const slide = state.slides[state.currentIndex];
@@ -2251,68 +2514,89 @@
           return dx < 0.15 && dy < 0.08;
         }
 
+        function isNearWatermark(normX, normY) {
+          const wm = state.config.watermark;
+          if (!wm?.img) return false;
+          const dx = Math.abs(normX - (wm.x ?? 0.5));
+          const dy = Math.abs(normY - (wm.y ?? 0.5));
+          return dx < 0.15 && dy < 0.1;
+        }
+
         canvas.addEventListener('mousedown', e => {
-          const textObj = getTextObjForCurrentSlide();
-          if (!textObj) return;
           const pos = canvasToNorm(e);
-          if (isNearText(pos.x, pos.y, textObj)) {
-            dragging = true;
+          // Watermark takes priority
+          if (isNearWatermark(pos.x, pos.y)) {
+            dragMode = 'watermark';
+            canvas.style.cursor = 'move';
+            e.preventDefault();
+            return;
+          }
+          const textObj = getTextObjForCurrentSlide();
+          if (textObj && isNearText(pos.x, pos.y, textObj)) {
+            dragMode = 'text';
             canvas.classList.add('text-drag');
             e.preventDefault();
           }
         });
 
         canvas.addEventListener('mousemove', e => {
-          if (!dragging) {
-            // Show move cursor when hovering near text
-            const textObj = getTextObjForCurrentSlide();
-            if (textObj) {
-              const pos = canvasToNorm(e);
-              canvas.style.cursor = isNearText(pos.x, pos.y, textObj) ? 'move' : '';
+          const pos = canvasToNorm(e);
+
+          if (!dragMode) {
+            // Cursor hint
+            if (isNearWatermark(pos.x, pos.y)) {
+              canvas.style.cursor = 'move';
+            } else {
+              const textObj = getTextObjForCurrentSlide();
+              canvas.style.cursor = (textObj && isNearText(pos.x, pos.y, textObj)) ? 'move' : '';
             }
             return;
           }
-          const textObj = getTextObjForCurrentSlide();
-          if (!textObj) return;
-          const pos = canvasToNorm(e);
-          textObj.position.x = pos.x;
-          textObj.position.y = pos.y;
-          renderFrame();
-          // Sync position sliders if global text controls are visible
-          const xSlider = document.querySelector('#section-texto .tc-pos-x');
-          const ySlider = document.querySelector('#section-texto .tc-pos-y');
-          if (xSlider) { xSlider.value = pos.x; xSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
-          if (ySlider) { ySlider.value = pos.y; ySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
-          // Also sync per-slide override panel sliders if in 'own' mode
-          const activeSlide = state.slides[state.currentIndex];
-          if (activeSlide && activeSlide.overrides?.textMode === 'own') {
-            const overridePanel = document.getElementById('override-' + activeSlide.id);
-            if (overridePanel) {
-              const oxSlider = overridePanel.querySelector('.tc-pos-x');
-              const oySlider = overridePanel.querySelector('.tc-pos-y');
-              if (oxSlider) { oxSlider.value = pos.x; oxSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
-              if (oySlider) { oySlider.value = pos.y; oySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
+
+          if (dragMode === 'watermark') {
+            if (!state.config.watermark) return;
+            state.config.watermark.x = pos.x;
+            state.config.watermark.y = pos.y;
+            renderFrame();
+            return;
+          }
+
+          if (dragMode === 'text') {
+            const textObj = getTextObjForCurrentSlide();
+            if (!textObj) return;
+            textObj.position.x = pos.x;
+            textObj.position.y = pos.y;
+            renderFrame();
+            // Sync position sliders if global text controls are visible
+            const xSlider = document.querySelector('#section-texto .tc-pos-x');
+            const ySlider = document.querySelector('#section-texto .tc-pos-y');
+            if (xSlider) { xSlider.value = pos.x; xSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
+            if (ySlider) { ySlider.value = pos.y; ySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
+            // Also sync per-slide override panel sliders if in 'own' mode
+            const activeSlide = state.slides[state.currentIndex];
+            if (activeSlide && activeSlide.overrides?.textMode === 'own') {
+              const overridePanel = document.getElementById('override-' + activeSlide.id);
+              if (overridePanel) {
+                const oxSlider = overridePanel.querySelector('.tc-pos-x');
+                const oySlider = overridePanel.querySelector('.tc-pos-y');
+                if (oxSlider) { oxSlider.value = pos.x; oxSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
+                if (oySlider) { oySlider.value = pos.y; oySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
+              }
             }
           }
         });
 
-        canvas.addEventListener('mouseup', () => {
-          if (dragging) {
-            dragging = false;
+        function endDrag() {
+          if (dragMode) {
+            dragMode = null;
             canvas.classList.remove('text-drag');
             canvas.style.cursor = '';
             saveProject(state);
           }
-        });
+        }
 
-        canvas.addEventListener('mouseleave', () => {
-          if (dragging) {
-            dragging = false;
-            canvas.classList.remove('text-drag');
-            canvas.style.cursor = '';
-            saveProject(state);
-          }
-        });
+        canvas.addEventListener('mouseup', endDrag);
+        canvas.addEventListener('mouseleave', endDrag);
       })();
     }
 
