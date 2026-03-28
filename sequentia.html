@@ -304,6 +304,78 @@
                           border: none; color: var(--text); font-size: 13px; font-family: var(--sans);
                           text-align: left; cursor: pointer; border-radius: 4px; }
     #contextMenu button:hover { background: var(--s3); }
+
+    /* Config panels */
+    #configPanels { display: flex; flex-direction: column; gap: 1px; }
+
+    .config-section { border-bottom: 1px solid var(--border); }
+    .section-toggle {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; padding: 12px 16px; background: none; border: none;
+      color: var(--text); font-size: 13px; font-weight: 500; font-family: var(--sans);
+      cursor: pointer; text-align: left;
+    }
+    .section-toggle:hover { background: var(--s1); }
+    .section-toggle .chevron { transition: transform 0.2s; flex-shrink: 0; }
+    .config-section.open .chevron { transform: rotate(180deg); }
+    .section-body { padding: 0 16px 14px; display: none; }
+    .config-section.open .section-body { display: block; }
+
+    /* Controls dentro de secciones */
+    .cfg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .cfg-row:last-child { margin-bottom: 0; }
+    .cfg-label { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+    .cfg-value { font-size: 12px; color: var(--text); font-family: var(--mono); }
+
+    /* Pill buttons (aspect ratio, resolution, fps, quality, fit, transition) */
+    .pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pill {
+      padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border);
+      background: none; color: var(--muted); font-size: 12px; font-family: var(--sans);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .pill:hover { border-color: var(--accent2); color: var(--text); }
+    .pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    /* Range sliders */
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+
+    /* Number inputs */
+    input[type=number].cfg-input {
+      background: var(--s3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: var(--mono);
+      width: 72px;
+    }
+    input[type=number].cfg-input:focus { outline: none; border-color: var(--accent); }
+
+    /* Text inputs */
+    input[type=text].cfg-input {
+      background: var(--s3); border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: var(--sans);
+      width: 100%;
+    }
+    input[type=text].cfg-input:focus { outline: none; border-color: var(--accent); }
+
+    /* Color picker */
+    input[type=color] { border: none; background: none; cursor: pointer; width: 32px; height: 24px; padding: 0; border-radius: 4px; }
+
+    /* Compat indicator */
+    .compat-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .compat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* Presets */
+    .preset-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+    .preset-item { display: flex; align-items: center; justify-content: space-between;
+                   padding: 4px 8px; background: var(--s3); border-radius: 4px; font-size: 12px; }
+    .preset-item button { background: none; border: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+    .preset-item button:hover { color: var(--red); }
+
+    /* Thumbnail de bg image */
+    #bgImagePreview { width: 48px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
+
+    /* Transicion direction selector */
+    .dir-select { display: flex; gap: 4px; }
+    .transition-opts { margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -518,6 +590,7 @@
       updateCanvasSize();
       renderFrame();
       await saveProject(state);
+      updateExportEstimate();
     }
 
     function removeSlide(id) {
@@ -1130,6 +1203,431 @@
       }
     }
 
+    // ── Task 7: Configuration Panels ────────────────────────────────
+
+    function collapsibleSection(id, title, contentHTML, openByDefault = false) {
+      const section = document.createElement('div');
+      section.className = 'config-section' + (openByDefault ? ' open' : '');
+      section.id = 'section-' + id;
+      section.innerHTML = `
+        <button class="section-toggle">
+          <span>${title}</span>
+          <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div class="section-body">${contentHTML}</div>
+      `;
+      section.querySelector('.section-toggle').addEventListener('click', () => {
+        section.classList.toggle('open');
+      });
+      return section;
+    }
+
+    function buildConfigPanels() {
+      const container = document.getElementById('configPanels');
+      container.innerHTML = '';
+
+      // --- SECCIÓN CANVAS ---
+      const canvasHTML = `
+        <div class="cfg-row">
+          <span class="cfg-label">Aspect Ratio</span>
+          <div class="pill-group" id="pillAspectRatio">
+            ${['16:9','9:16','1:1','4:3','4:5','21:9','Custom'].map(r =>
+              `<button class="pill${state.config.aspectRatio === r || (r === 'Custom' && state.config.aspectRatio === 'custom') ? ' active' : ''}" data-ratio="${r === 'Custom' ? 'custom' : r}">${r}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="cfg-row" id="rowCustom" style="display:${state.config.aspectRatio === 'custom' ? 'flex' : 'none'}">
+          <span class="cfg-label">Custom</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" class="cfg-input" id="inputCustomW" value="${state.config.customW}" min="1" step="1" style="width:64px">
+            <span class="cfg-label">×</span>
+            <input type="number" class="cfg-input" id="inputCustomH" value="${state.config.customH}" min="1" step="1" style="width:64px">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Resolución</span>
+          <div class="pill-group" id="pillResolution">
+            ${['720p','1080p'].map(r =>
+              `<button class="pill${state.config.resolution === r ? ' active' : ''}" data-res="${r}">${r}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Fit Mode</span>
+          <div class="pill-group" id="pillFitMode">
+            ${[['contain','Contain'],['cover','Cover'],['fit-width','Fit W'],['fit-height','Fit H']].map(([v,l]) =>
+              `<button class="pill${state.config.fitMode === v ? ' active' : ''}" data-fit="${v}">${l}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Presets</span>
+          <button class="pill" id="btnSavePreset">Guardar preset</button>
+        </div>
+        <div id="presetList" class="preset-list"></div>
+      `;
+      container.appendChild(collapsibleSection('canvas', 'Canvas', canvasHTML, true));
+
+      // --- SECCIÓN FONDO ---
+      const bgHTML = `
+        <div class="cfg-row">
+          <span class="cfg-label">Blur imagen <span class="cfg-value" id="lblBgBlur">${state.config.bgBlur}</span></span>
+          <input type="range" id="sliderBgBlur" min="0" max="100" value="${state.config.bgBlur}">
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Color fondo</span>
+          <input type="color" id="pickBgColor" value="${state.config.bgColor}">
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Imagen personalizada</span>
+          <button class="pill" id="btnBgImage">Subir PNG/JPG</button>
+        </div>
+        <div class="cfg-row" id="rowBgImagePreview" style="display:${state.config.bgImageId ? 'flex' : 'none'}">
+          <img id="bgImagePreview" src="">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <input type="range" id="sliderBgImageBlur" min="0" max="100" value="${state.config.bgImageBlur ?? 0}">
+            <button class="pill" id="btnBgImageRemove" style="color:var(--red)">Quitar</button>
+          </div>
+        </div>
+        <input type="file" id="bgImageInput" accept="image/jpeg,image/png" hidden>
+      `;
+      container.appendChild(collapsibleSection('bg', 'Fondo', bgHTML));
+
+      // --- SECCIÓN TIMING ---
+      const timingHTML = `
+        <div class="cfg-row">
+          <span class="cfg-label">Duración slide (s)</span>
+          <input type="number" class="cfg-input" id="inputSlideDuration" value="${state.config.slideDuration}" min="0.1" step="0.1">
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Duración transición (s)</span>
+          <input type="number" class="cfg-input" id="inputTransDuration" value="${state.config.transitionDuration}" min="0" step="0.1">
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px">La transición se añade entre slides — no consume el tiempo del slide</p>
+      `;
+      container.appendChild(collapsibleSection('timing', 'Timing', timingHTML));
+
+      // --- SECCIÓN TRANSICIONES ---
+      const transHTML = `
+        <div class="pill-group" id="pillTransition">
+          ${[
+            ['fade','Fade'],['slide','Slide'],['zoom-punch','Zoom Punch'],
+            ['wipe','Wipe'],['cross-zoom','Cross-Zoom'],['flash','Flash'],['random','Random']
+          ].map(([v,l]) =>
+            `<button class="pill${state.config.transition === v ? ' active' : ''}" data-trans="${v}">${l}</button>`
+          ).join('')}
+        </div>
+        <div class="transition-opts" id="transitionOpts"></div>
+      `;
+      container.appendChild(collapsibleSection('transitions', 'Transición', transHTML));
+
+      // --- SECCIÓN EXPORTACIÓN ---
+      const exportHTML = `
+        <div class="cfg-row">
+          <span class="cfg-label">FPS</span>
+          <div class="pill-group" id="pillFPS">
+            ${['24','30','60'].map(f =>
+              `<button class="pill${state.config.fps == f ? ' active' : ''}" data-fps="${f}">${f}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Calidad</span>
+          <div class="pill-group" id="pillQuality">
+            ${[['low','Bajo'],['medium','Medio'],['high','Alto']].map(([v,l]) =>
+              `<button class="pill${state.config.quality === v ? ' active' : ''}" data-quality="${v}">${l}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Nombre de archivo</span>
+          <input type="text" class="cfg-input" id="inputFilename" value="${state.config.filename}">
+        </div>
+        <div class="cfg-row">
+          <div class="compat-indicator">
+            <div class="compat-dot" id="compatDot"></div>
+            <span id="compatLabel"></span>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Estimación</span>
+          <span class="cfg-value" id="exportEstimate">–</span>
+        </div>
+      `;
+      container.appendChild(collapsibleSection('export', 'Exportación', exportHTML));
+
+      // Montar event listeners de los paneles
+      bindConfigPanelEvents();
+      renderPresets();
+      updateTransitionOpts();
+      checkWebCodecsSupport();
+      updateExportEstimate();
+    }
+
+    function bindConfigPanelEvents() {
+      // Aspect ratio pills
+      document.getElementById('pillAspectRatio').addEventListener('click', e => {
+        const btn = e.target.closest('[data-ratio]');
+        if (!btn) return;
+        state.config.aspectRatio = btn.dataset.ratio;
+        document.querySelectorAll('#pillAspectRatio .pill').forEach(b => b.classList.toggle('active', b.dataset.ratio === state.config.aspectRatio));
+        document.getElementById('rowCustom').style.display = state.config.aspectRatio === 'custom' ? 'flex' : 'none';
+        updateCanvasSize(); renderFrame(); saveProject(state);
+      });
+
+      document.getElementById('inputCustomW').addEventListener('change', e => {
+        state.config.customW = parseInt(e.target.value) || 1920;
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); saveProject(state); }
+      });
+      document.getElementById('inputCustomH').addEventListener('change', e => {
+        state.config.customH = parseInt(e.target.value) || 1080;
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); saveProject(state); }
+      });
+
+      // Resolution pills
+      document.getElementById('pillResolution').addEventListener('click', e => {
+        const btn = e.target.closest('[data-res]');
+        if (!btn) return;
+        state.config.resolution = btn.dataset.res;
+        document.querySelectorAll('#pillResolution .pill').forEach(b => b.classList.toggle('active', b.dataset.res === state.config.resolution));
+        updateCanvasSize(); renderFrame(); renderThumbs(); saveProject(state); updateExportEstimate();
+      });
+
+      // Fit mode pills
+      document.getElementById('pillFitMode').addEventListener('click', e => {
+        const btn = e.target.closest('[data-fit]');
+        if (!btn) return;
+        state.config.fitMode = btn.dataset.fit;
+        document.querySelectorAll('#pillFitMode .pill').forEach(b => b.classList.toggle('active', b.dataset.fit === state.config.fitMode));
+        renderFrame(); saveProject(state);
+      });
+
+      // Preset save
+      document.getElementById('btnSavePreset').addEventListener('click', () => {
+        const name = prompt('Nombre del preset:');
+        if (!name?.trim()) return;
+        const presets = JSON.parse(localStorage.getItem('sequentia-presets') || '[]');
+        if (presets.find(p => p.name === name.trim())) { showToast('Ya existe un preset con ese nombre', 'error'); return; }
+        presets.push({ name: name.trim(), w: state.config.customW, h: state.config.customH });
+        localStorage.setItem('sequentia-presets', JSON.stringify(presets));
+        renderPresets();
+      });
+
+      // Fondo blur
+      document.getElementById('sliderBgBlur').addEventListener('input', e => {
+        state.config.bgBlur = parseInt(e.target.value);
+        document.getElementById('lblBgBlur').textContent = state.config.bgBlur;
+        renderFrame(); saveProject(state);
+      });
+
+      // Color fondo
+      document.getElementById('pickBgColor').addEventListener('input', e => {
+        state.config.bgColor = e.target.value;
+        renderFrame(); saveProject(state);
+      });
+
+      // Imagen personalizada
+      document.getElementById('btnBgImage').addEventListener('click', () => {
+        document.getElementById('bgImageInput').click();
+      });
+      document.getElementById('bgImageInput').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!['image/jpeg','image/png'].includes(file.type)) { showToast('Solo JPG/PNG', 'error'); return; }
+        const blob = file;
+        const id = 'bg-' + crypto.randomUUID();
+        await dbPut('images', { id, blob, name: file.name });
+        state.config.bgImageId = id;
+        state.config.bgImageBlur = 0;
+        const url = URL.createObjectURL(blob);
+        const img = document.getElementById('bgImagePreview');
+        img.src = url;
+        document.getElementById('rowBgImagePreview').style.display = 'flex';
+        renderFrame(); saveProject(state);
+        e.target.value = '';
+      });
+      document.getElementById('btnBgImageRemove').addEventListener('click', () => {
+        if (state.config.bgImageId) dbDelete('images', state.config.bgImageId);
+        state.config.bgImageId = null;
+        document.getElementById('rowBgImagePreview').style.display = 'none';
+        renderFrame(); saveProject(state);
+      });
+      document.getElementById('sliderBgImageBlur').addEventListener('input', e => {
+        state.config.bgImageBlur = parseInt(e.target.value);
+        renderFrame(); saveProject(state);
+      });
+
+      // Timing
+      document.getElementById('inputSlideDuration').addEventListener('change', e => {
+        state.config.slideDuration = Math.max(0.1, parseFloat(e.target.value) || 3);
+        e.target.value = state.config.slideDuration;
+        saveProject(state);
+      });
+      document.getElementById('inputTransDuration').addEventListener('change', e => {
+        state.config.transitionDuration = Math.max(0, parseFloat(e.target.value) || 0);
+        e.target.value = state.config.transitionDuration;
+        saveProject(state); updateExportEstimate();
+      });
+
+      // Transición pills
+      document.getElementById('pillTransition').addEventListener('click', e => {
+        const btn = e.target.closest('[data-trans]');
+        if (!btn) return;
+        state.config.transition = btn.dataset.trans;
+        document.querySelectorAll('#pillTransition .pill').forEach(b => b.classList.toggle('active', b.dataset.trans === state.config.transition));
+        updateTransitionOpts();
+        saveProject(state);
+      });
+
+      // FPS
+      document.getElementById('pillFPS').addEventListener('click', e => {
+        const btn = e.target.closest('[data-fps]');
+        if (!btn) return;
+        state.config.fps = parseInt(btn.dataset.fps);
+        document.querySelectorAll('#pillFPS .pill').forEach(b => b.classList.toggle('active', b.dataset.fps == state.config.fps));
+        saveProject(state); updateExportEstimate();
+      });
+
+      // Calidad
+      document.getElementById('pillQuality').addEventListener('click', e => {
+        const btn = e.target.closest('[data-quality]');
+        if (!btn) return;
+        state.config.quality = btn.dataset.quality;
+        document.querySelectorAll('#pillQuality .pill').forEach(b => b.classList.toggle('active', b.dataset.quality === state.config.quality));
+        saveProject(state); updateExportEstimate();
+      });
+
+      // Nombre de archivo
+      document.getElementById('inputFilename').addEventListener('change', e => {
+        state.config.filename = e.target.value.trim() || 'sequentia';
+        e.target.value = state.config.filename;
+        saveProject(state);
+      });
+    }
+
+    function renderPresets() {
+      const list = document.getElementById('presetList');
+      if (!list) return;
+      const presets = JSON.parse(localStorage.getItem('sequentia-presets') || '[]');
+      list.innerHTML = '';
+      presets.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'preset-item';
+        item.innerHTML = `<span>${p.name} <span style="color:var(--muted)">${p.w}×${p.h}</span></span>`;
+        const del = document.createElement('button');
+        del.textContent = '×';
+        del.title = 'Eliminar preset';
+        del.addEventListener('click', () => {
+          const ps = JSON.parse(localStorage.getItem('sequentia-presets') || '[]');
+          localStorage.setItem('sequentia-presets', JSON.stringify(ps.filter(x => x.name !== p.name)));
+          renderPresets();
+        });
+        const apply = document.createElement('button');
+        apply.textContent = '↩';
+        apply.title = 'Aplicar preset';
+        apply.style.marginRight = '4px';
+        apply.addEventListener('click', () => {
+          state.config.aspectRatio = 'custom';
+          state.config.customW = p.w;
+          state.config.customH = p.h;
+          buildConfigPanels(); // rebuilds UI with new values
+          updateCanvasSize(); renderFrame(); saveProject(state);
+        });
+        item.appendChild(apply);
+        item.appendChild(del);
+        list.appendChild(item);
+      });
+    }
+
+    function updateTransitionOpts() {
+      const opts = document.getElementById('transitionOpts');
+      if (!opts) return;
+      const t = state.config.transition;
+      opts.innerHTML = '';
+      if (t === 'slide' || t === 'wipe') {
+        const dirs = t === 'slide'
+          ? [['slide-left','←'],['slide-right','→'],['slide-up','↑'],['slide-down','↓']]
+          : [['wipe-left','←'],['wipe-right','→'],['wipe-up','↑'],['wipe-down','↓']];
+        const curDir = state.config.transitionDir || (t + '-left');
+        const group = document.createElement('div');
+        group.className = 'pill-group dir-select';
+        dirs.forEach(([val, label]) => {
+          const btn = document.createElement('button');
+          btn.className = 'pill' + (curDir === val ? ' active' : '');
+          btn.textContent = label;
+          btn.title = val;
+          btn.addEventListener('click', () => {
+            state.config.transitionDir = val;
+            group.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b.title === val));
+            saveProject(state);
+          });
+          group.appendChild(btn);
+        });
+        opts.appendChild(group);
+      } else if (t === 'cross-zoom') {
+        const speed = state.config.crossZoomSpeed ?? 0.5;
+        opts.innerHTML = `
+          <div class="cfg-row" style="margin-top:8px">
+            <span class="cfg-label">Velocidad <span class="cfg-value" id="lblCrossZoom">${speed.toFixed(1)}</span></span>
+            <input type="range" id="sliderCrossZoom" min="0.1" max="1" step="0.1" value="${speed}">
+          </div>`;
+        document.getElementById('sliderCrossZoom').addEventListener('input', e => {
+          state.config.crossZoomSpeed = parseFloat(e.target.value);
+          document.getElementById('lblCrossZoom').textContent = state.config.crossZoomSpeed.toFixed(1);
+          saveProject(state);
+        });
+      } else if (t === 'flash') {
+        const color = state.config.flashColor ?? '#ffffff';
+        opts.innerHTML = `
+          <div class="cfg-row" style="margin-top:8px">
+            <span class="cfg-label">Color flash</span>
+            <input type="color" id="pickFlashColor" value="${color}">
+          </div>`;
+        document.getElementById('pickFlashColor').addEventListener('input', e => {
+          state.config.flashColor = e.target.value;
+          saveProject(state);
+        });
+      }
+    }
+
+    function estimateSizeBytes(config, slidesCount) {
+      if (slidesCount === 0) return 0;
+      const { w, h } = getCanvasDimensions();
+      const bitrates = {
+        low:    { '720p': 2_000_000, '1080p': 4_000_000 },
+        medium: { '720p': 4_000_000, '1080p': 8_000_000 },
+        high:   { '720p': 8_000_000, '1080p': 16_000_000 },
+      };
+      const bitrate = (bitrates[config.quality] || bitrates.medium)[config.resolution] || 8_000_000;
+      const totalSecs = slidesCount * config.slideDuration + Math.max(0, slidesCount - 1) * config.transitionDuration;
+      return (bitrate / 8) * totalSecs;
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function updateExportEstimate() {
+      const el = document.getElementById('exportEstimate');
+      if (!el) return;
+      const bytes = estimateSizeBytes(state.config, state.slides.length);
+      el.textContent = bytes > 0 ? formatBytes(bytes) : '–';
+    }
+
+    function checkWebCodecsSupport() {
+      const dot = document.getElementById('compatDot');
+      const label = document.getElementById('compatLabel');
+      if (!dot || !label) return;
+      const supported = typeof VideoEncoder !== 'undefined';
+      dot.style.background = supported ? 'var(--green)' : 'var(--red)';
+      label.textContent = supported ? 'Listo para exportar' : 'Requiere Chrome o Edge';
+      document.getElementById('btnExport').disabled = !supported || state.slides.length === 0;
+    }
+
     // ── Init ─────────────────────────────────────────────────────────
 
     async function main() {
@@ -1142,6 +1640,9 @@
       // Task 4: Inicializar canvas
       updateCanvasSize();
       updateEmptyState();
+
+      // Task 7: Configuration panels
+      buildConfigPanels();
 
       // Task 4: Reajustar canvas al cambiar ventana
       window.addEventListener('resize', () => {
