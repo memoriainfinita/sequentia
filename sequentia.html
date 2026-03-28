@@ -2225,24 +2225,13 @@
         const canvas = document.getElementById('previewCanvas');
         let dragging = false;
 
-        function getTextObjForCurrentSlide({ create = false } = {}) {
+        function getTextObjForCurrentSlide() {
           const slide = state.slides[state.currentIndex];
           if (!slide) return null;
           const mode = slide.overrides?.textMode ?? 'inherit';
           if (mode === 'none') return null;
-          if (mode === 'own') {
-            if (!slide.overrides.text) {
-              if (!create) return null;
-              slide.overrides.text = makeDefaultText();
-            }
-            return slide.overrides.text;
-          }
-          // inherit — edit global
-          if (!state.config.globalText) {
-            if (!create) return null;
-            state.config.globalText = makeDefaultText();
-          }
-          return state.config.globalText;
+          if (mode === 'own') return slide.overrides.text ?? null;
+          return state.config.globalText ?? null;
         }
 
         function canvasToNorm(e) {
@@ -2296,7 +2285,7 @@
           if (ySlider) { ySlider.value = pos.y; ySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
           // Also sync per-slide override panel sliders if in 'own' mode
           const activeSlide = state.slides[state.currentIndex];
-          if (activeSlide && activeSlide.overrides.textMode === 'own') {
+          if (activeSlide && activeSlide.overrides?.textMode === 'own') {
             const overridePanel = document.getElementById('override-' + activeSlide.id);
             if (overridePanel) {
               const oxSlider = overridePanel.querySelector('.tc-pos-x');
