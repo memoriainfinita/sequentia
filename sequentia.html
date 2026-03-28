@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sequentia</title>
+  <!-- Google Fonts: IBM Plex Mono (400,500), IBM Plex Sans (400,500,600), Inter, Playfair Display, Montserrat, Oswald, Lato -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;700&family=Montserrat:wght@400;500;700&family=Oswald:wght@400;500;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    /* ── Design Tokens ──────────────────────────────────────────── */
+    :root {
+      --bg:      #09090b;
+      --s1:      #111113;
+      --s2:      #18181b;
+      --s3:      #27272a;
+      --border:  #2e2e32;
+      --text:    #fafafa;
+      --muted:   #71717a;
+      --accent:  #f97316;
+      --accent2: #fb923c;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --mono:    'IBM Plex Mono', monospace;
+      --sans:    'IBM Plex Sans', system-ui, sans-serif;
+    }
+
+    /* ── Reset ──────────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      background: var(--s1);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 15px;
+      font-family: var(--sans);
+      color: var(--text);
+    }
+
+    .logo-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .btn-export {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: background 0.15s;
+    }
+
+    .btn-export:hover {
+      background: var(--accent2);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .btn-ghost:hover {
+      color: var(--text);
+      border-color: var(--text);
+    }
+
+    /* ── Toggle ──────────────────────────────────────────────────── */
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+
+    .toggle input[type="checkbox"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* ── Indicator ───────────────────────────────────────────────── */
+    .indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #panelCenter {
+      overflow-y: auto;
+      background: var(--bg);
+    }
+
+    #panelRight {
+      background: var(--s2);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+    }
+
+    /* ── Scrollbar ───────────────────────────────────────────────── */
+    #panelCenter::-webkit-scrollbar,
+    #panelRight::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #panelCenter::-webkit-scrollbar-track,
+    #panelRight::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #panelCenter::-webkit-scrollbar-thumb,
+    #panelRight::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    #panelCenter::-webkit-scrollbar-thumb:hover,
+    #panelRight::-webkit-scrollbar-thumb:hover {
+      background: var(--muted);
+    }
+
+    /* ── Toast System ────────────────────────────────────────────── */
+    #toastContainer {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: var(--sans);
+      color: var(--text);
+      background: var(--s3);
+      border: 1px solid var(--border);
+      max-width: 320px;
+      pointer-events: auto;
+      animation: toastIn 0.2s ease forwards;
+    }
+
+    .toast.toast-out {
+      animation: toastOut 0.2s ease forwards;
+    }
+
+    .toast-success {
+      border-color: var(--green);
+      background: color-mix(in srgb, var(--green) 12%, var(--s3));
+    }
+
+    .toast-error {
+      border-color: var(--red);
+      background: color-mix(in srgb, var(--red) 12%, var(--s3));
+    }
+
+    .toast-info {
+      border-color: var(--border);
+      background: var(--s3);
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(20px); }
+    }
+  </style>
+</head>
+<body>
+
+  <header id="header">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      Sequentia
+    </div>
+    <div class="header-center">
+      <button id="btnExport" class="btn-export">Exportar Video</button>
+    </div>
+    <div class="header-right">
+      <span id="indicator" class="indicator"></span>
+      <label class="toggle"><input type="checkbox" id="chkLoop"> Loop</label>
+      <button id="btnExportJSON" class="btn-ghost">Export JSON</button>
+      <button id="btnImportJSON" class="btn-ghost">Import JSON</button>
+    </div>
+  </header>
+
+  <div id="app">
+    <div id="panelCenter"><!-- preview + config, Tasks 4+ --></div>
+    <div id="panelRight"><!-- thumbnails, Task 3 --></div>
+  </div>
+
+  <div id="toastContainer"></div>
+
+  <input type="file" id="fileInput" accept="image/jpeg,image/png" multiple hidden>
+
+  <script type="module">
+    // Tasks 2+ aquí
+  </script>
+
+</body>
+</html>
