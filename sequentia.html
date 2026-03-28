@@ -145,7 +145,6 @@
     }
 
     #panelCenter {
-      overflow-y: auto;
       background: var(--bg);
     }
 
@@ -265,6 +264,19 @@
                    color: white; font-size: 10px; font-family: var(--mono); padding: 1px 4px;
                    border-radius: 3px; font-weight: 700; }
 
+    /* Panel central */
+    #panelCenter { display: flex; flex-direction: column; overflow: hidden; }
+    #previewArea { display: flex; flex-direction: column; align-items: center; padding: 16px; gap: 12px; flex-shrink: 0; }
+    #previewWrap { position: relative; background: #000; border-radius: 8px; overflow: hidden;
+                   display: flex; align-items: center; justify-content: center; }
+    #previewCanvas { display: block; }
+    #canvasEmpty { position: absolute; display: flex; flex-direction: column; align-items: center;
+                   justify-content: center; gap: 12px; color: var(--muted); font-size: 14px; inset: 0; }
+    #canvasInfo { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.5);
+                  color: var(--muted); font-size: 11px; font-family: var(--mono);
+                  padding: 3px 6px; border-radius: 3px; pointer-events: none; }
+    #configPanels { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+
     /* Context menu */
     #contextMenu { position: fixed; background: var(--s2); border: 1px solid var(--border);
                    border-radius: 6px; padding: 4px; z-index: 1000; min-width: 160px; }
@@ -293,7 +305,23 @@
   </header>
 
   <div id="app">
-    <div id="panelCenter"><!-- preview + config, Tasks 4+ --></div>
+    <div id="panelCenter">
+      <div id="previewArea">
+        <div id="previewWrap">
+          <canvas id="previewCanvas"></canvas>
+          <div id="canvasEmpty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <p>Carga imágenes para comenzar</p>
+          </div>
+          <div id="canvasInfo"><!-- se actualiza con ratio y resolución --></div>
+        </div>
+        <div id="playControls"><!-- Task 5 --></div>
+      </div>
+      <div id="configPanels"><!-- Task 7 --></div>
+    </div>
     <div id="panelRight">
       <div id="thumbList">
         <div id="emptyState">
@@ -452,12 +480,14 @@
           blobUrl: URL.createObjectURL(blob),
           overrides: {},
         };
-        bitmap.close();
+        slide._bitmap = bitmap; // guardar para dibujo
         await dbPut('images', { id, blob, name: file.name, width: slide.width, height: slide.height });
         state.slides.push(slide);
       }
 
       renderThumbs();
+      updateCanvasSize();
+      renderFrame();
       await saveProject(state);
     }
 
@@ -466,6 +496,7 @@
       if (idx === -1) return;
       const slide = state.slides[idx];
       URL.revokeObjectURL(slide.blobUrl);
+      if (slide._bitmap) { slide._bitmap.close(); delete slide._bitmap; }
       dbDelete('images', id);
       state.slides.splice(idx, 1);
       if (state.currentIndex >= state.slides.length) {
@@ -491,6 +522,7 @@
       if (state.slides.length === 0) {
         list.innerHTML = '';
         list.appendChild(empty);
+        updateEmptyState();
         return;
       }
 
@@ -580,6 +612,8 @@
           showContextMenu(e.clientX, e.clientY, slide);
         });
       });
+
+      updateEmptyState();
     }
 
     // ── Task 3: Context Menu ─────────────────────────────────────────
@@ -626,6 +660,149 @@
       document.addEventListener('click', () => menu.remove(), { once: true });
     }
 
+    // ── Task 4: Canvas Preview Engine ───────────────────────────────
+
+    function getCanvasDimensions() {
+      const h = state.config.resolution === '720p' ? 720 : 1080;
+      const ratios = { '16:9': 16/9, '9:16': 9/16, '1:1': 1, '4:3': 4/3, '4:5': 4/5, '21:9': 21/9 };
+      let ratio;
+      if (state.config.aspectRatio === 'custom') {
+        ratio = state.config.customW / state.config.customH;
+      } else {
+        ratio = ratios[state.config.aspectRatio] ?? (16/9);
+      }
+      const w = Math.round(h * ratio / 2) * 2; // par
+      return { w, h };
+    }
+
+    function updateCanvasSize() {
+      const canvas = document.getElementById('previewCanvas');
+      const wrap = document.getElementById('previewWrap');
+      const info = document.getElementById('canvasInfo');
+      const { w, h } = getCanvasDimensions();
+
+      canvas.width = w;
+      canvas.height = h;
+
+      // Calcular tamaño visual del wrap para caber en el área disponible
+      const area = document.getElementById('previewArea');
+      const maxW = area.clientWidth - 32;
+      const maxH = Math.min(area.clientHeight || 600, window.innerHeight * 0.55);
+      const scale = Math.min(maxW / w, maxH / h, 1);
+      const displayW = Math.round(w * scale);
+      const displayH = Math.round(h * scale);
+
+      wrap.style.width = displayW + 'px';
+      wrap.style.height = displayH + 'px';
+
+      // Actualizar CSS ratio para thumbnails
+      const ratioLabel = state.config.aspectRatio === 'custom'
+        ? `${state.config.customW}:${state.config.customH}`
+        : state.config.aspectRatio;
+      const cssRatio = w + '/' + h;
+      document.documentElement.style.setProperty('--canvas-ratio', cssRatio);
+
+      if (info) info.textContent = `${ratioLabel} · ${state.config.resolution}`;
+    }
+
+    function calcFit(imgW, imgH, canvasW, canvasH, mode) {
+      const imgRatio = imgW / imgH;
+      const canRatio = canvasW / canvasH;
+      let dw, dh;
+      if (mode === 'cover') {
+        dw = imgRatio > canRatio ? canvasH * imgRatio : canvasW;
+        dh = dw / imgRatio;
+      } else if (mode === 'fit-width') {
+        dw = canvasW;
+        dh = dw / imgRatio;
+      } else if (mode === 'fit-height') {
+        dh = canvasH;
+        dw = dh * imgRatio;
+      } else { // contain (default)
+        if (imgRatio > canRatio) { dw = canvasW; dh = dw / imgRatio; }
+        else { dh = canvasH; dw = dh * imgRatio; }
+      }
+      return { dx: (canvasW - dw) / 2, dy: (canvasH - dh) / 2, dw, dh };
+    }
+
+    async function getImageBitmap(slide) {
+      // Intenta usar el blobUrl cacheado; si no, carga desde IndexedDB
+      if (slide.blobUrl) {
+        const resp = await fetch(slide.blobUrl);
+        const blob = await resp.blob();
+        return createImageBitmap(blob, { imageOrientation: 'from-image' });
+      }
+      return null;
+    }
+
+    function drawSlide(ctx, slide, t = 0) {
+      if (!slide) return;
+      const w = ctx.canvas.width;
+      const h = ctx.canvas.height;
+      const cfg = state.config;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // 1. Fondo base (color)
+      ctx.fillStyle = cfg.bgColor || '#000000';
+      ctx.fillRect(0, 0, w, h);
+
+      // 2. Fondo con imagen del slide (blur)
+      if (slide._bitmap) {
+        if (cfg.bgBlur > 0) {
+          ctx.save();
+          ctx.filter = `blur(${cfg.bgBlur * 0.3}px)`;
+          // Cover con padding para evitar bordes cortados
+          const padding = 1.1;
+          const bw = w * padding, bh = h * padding;
+          const bx = (w - bw) / 2, by = (h - bh) / 2;
+          // Cover fit
+          const fit = calcFit(slide._bitmap.width, slide._bitmap.height, bw, bh, 'cover');
+          ctx.drawImage(slide._bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+          ctx.filter = 'none';
+          ctx.restore();
+        } else {
+          // Cover sin blur
+          const fit = calcFit(slide._bitmap.width, slide._bitmap.height, w, h, 'cover');
+          ctx.drawImage(slide._bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+        }
+      }
+
+      // 3. Imagen principal (según fitMode)
+      if (slide._bitmap) {
+        const fit = calcFit(slide._bitmap.width, slide._bitmap.height, w, h, cfg.fitMode || 'contain');
+        ctx.drawImage(slide._bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+      }
+
+      // 4. Vignette
+      if (cfg.vignette > 0) {
+        const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+        grad.addColorStop(0, 'transparent');
+        const alpha = Math.round(cfg.vignette * 255).toString(16).padStart(2, '0');
+        grad.addColorStop(1, (cfg.vignetteColor || '#000000') + alpha);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+
+    function renderFrame(t = 0) {
+      const canvas = document.getElementById('previewCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const slide = state.slides[state.currentIndex];
+      if (!slide) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      drawSlide(ctx, slide, t);
+    }
+
+    function updateEmptyState() {
+      const empty = document.getElementById('canvasEmpty');
+      if (!empty) return;
+      empty.style.display = state.slides.length === 0 ? 'flex' : 'none';
+    }
+
     // ── Init ─────────────────────────────────────────────────────────
 
     async function main() {
@@ -634,6 +811,16 @@
         console.error('IndexedDB no disponible');
         return;
       }
+
+      // Task 4: Inicializar canvas
+      updateCanvasSize();
+      updateEmptyState();
+
+      // Task 4: Reajustar canvas al cambiar ventana
+      window.addEventListener('resize', () => {
+        updateCanvasSize();
+        renderFrame();
+      });
 
       // Task 3: Event listeners — image loading
       document.getElementById('btnAddImages').addEventListener('click', () => {
