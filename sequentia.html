@@ -586,7 +586,20 @@
           // blobUrl excluido — se regenera al cargar
           overrides: s.overrides ?? {},
         })),
-        config: state.config,
+        config: {
+          ...state.config,
+          watermark: state.config.watermark ? {
+            id: state.config.watermark.id,
+            x: state.config.watermark.x,
+            y: state.config.watermark.y,
+            scale: state.config.watermark.scale,
+            opacity: state.config.watermark.opacity,
+          } : null,
+          frame: state.config.frame ? {
+            id: state.config.frame.id,
+            opacity: state.config.frame.opacity,
+          } : null,
+        },
         currentIndex: state.currentIndex,
       };
     }
@@ -996,7 +1009,7 @@
       // Vignette
       if (vignette > 0) {
         const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
-        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0, (vignetteColor || '#000000') + '00');
         grad.addColorStop(1, (vignetteColor || '#000000') + Math.round(vignette * 255).toString(16).padStart(2, '0'));
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
