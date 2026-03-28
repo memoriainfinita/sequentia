@@ -995,6 +995,141 @@
       }
     }
 
+    // ── Transitions (Task 6) ─────────────────────────────────────────
+
+    function transitionFade(ctx, slideA, slideB, t, w, h) {
+      drawSlide(ctx, slideA, 0);
+      const tmp = new OffscreenCanvas(w, h);
+      drawSlide(tmp.getContext('2d'), slideB, 0);
+      ctx.globalAlpha = t;
+      ctx.drawImage(tmp, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+
+    function transitionSlide(ctx, slideA, slideB, t, w, h, dir = 'left') {
+      const dirs = {
+        left:  [0, 0, -w * t, 0, w * (1 - t), 0],
+        right: [0, 0,  w * t, 0, -w * (1 - t), 0],
+        up:    [0, 0, 0, -h * t, 0, h * (1 - t)],
+        down:  [0, 0, 0,  h * t, 0, -h * (1 - t)],
+      };
+      const [,, ax, ay, bx, by] = dirs[dir] || dirs.left;
+
+      const tmpA = new OffscreenCanvas(w, h);
+      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      const tmpB = new OffscreenCanvas(w, h);
+      drawSlide(tmpB.getContext('2d'), slideB, 0);
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.save(); ctx.translate(ax, ay); ctx.drawImage(tmpA, 0, 0); ctx.restore();
+      ctx.save(); ctx.translate(bx, by); ctx.drawImage(tmpB, 0, 0); ctx.restore();
+    }
+
+    function transitionZoomPunch(ctx, slideA, slideB, t, w, h) {
+      const tmpA = new OffscreenCanvas(w, h);
+      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      const tmpB = new OffscreenCanvas(w, h);
+      drawSlide(tmpB.getContext('2d'), slideB, 0);
+
+      const scaleA = 1 + t * 0.15;
+      ctx.save();
+      ctx.translate(w / 2, h / 2); ctx.scale(scaleA, scaleA); ctx.translate(-w / 2, -h / 2);
+      ctx.globalAlpha = 1 - t;
+      ctx.drawImage(tmpA, 0, 0);
+      ctx.restore();
+
+      const scaleB = 1.15 - t * 0.15;
+      ctx.save();
+      ctx.translate(w / 2, h / 2); ctx.scale(scaleB, scaleB); ctx.translate(-w / 2, -h / 2);
+      ctx.globalAlpha = t;
+      ctx.drawImage(tmpB, 0, 0);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    function transitionWipe(ctx, slideA, slideB, t, w, h, dir = 'left') {
+      const tmpA = new OffscreenCanvas(w, h);
+      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      const tmpB = new OffscreenCanvas(w, h);
+      drawSlide(tmpB.getContext('2d'), slideB, 0);
+
+      ctx.drawImage(tmpA, 0, 0);
+      ctx.save();
+      ctx.beginPath();
+      if (dir === 'left')  ctx.rect(0,       0, w * t,       h);
+      if (dir === 'right') ctx.rect(w*(1-t), 0, w * t,       h);
+      if (dir === 'up')    ctx.rect(0,       0, w,       h * t);
+      if (dir === 'down')  ctx.rect(0, h*(1-t), w,       h * t);
+      ctx.clip();
+      ctx.drawImage(tmpB, 0, 0);
+      ctx.restore();
+    }
+
+    function transitionCrossZoom(ctx, slideA, slideB, t, w, h, speed = 0.5) {
+      const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+      const tmpA = new OffscreenCanvas(w, h);
+      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      const tmpB = new OffscreenCanvas(w, h);
+      drawSlide(tmpB.getContext('2d'), slideB, 0);
+
+      const scaleA = 1 + ease * speed * 2;
+      ctx.save();
+      ctx.translate(w/2, h/2); ctx.scale(scaleA, scaleA); ctx.translate(-w/2, -h/2);
+      ctx.globalAlpha = 1 - ease;
+      ctx.drawImage(tmpA, 0, 0);
+      ctx.restore();
+
+      const scaleB = 1 + (1 - ease) * speed * 2;
+      ctx.save();
+      ctx.translate(w/2, h/2); ctx.scale(scaleB, scaleB); ctx.translate(-w/2, -h/2);
+      ctx.globalAlpha = ease;
+      ctx.drawImage(tmpB, 0, 0);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    function transitionFlash(ctx, slideA, slideB, t, w, h, color = '#ffffff') {
+      const flashT = t < 0.5 ? t * 2 : (1 - t) * 2;
+      const tmp = new OffscreenCanvas(w, h);
+      drawSlide(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, 0);
+      ctx.drawImage(tmp, 0, 0);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = flashT;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+
+    let _randomTransition = 'fade';
+
+    function pickRandomTransition() {
+      const list = TRANSITIONS_LIST;
+      return list[Math.floor(Math.random() * list.length)];
+    }
+
+    function drawTransition(ctx, slideA, slideB, t, w, h) {
+      const cfg = state.config;
+      let transition = getEffectiveTransition(slideA);
+
+      if (transition === 'random') {
+        if (t < 0.01) _randomTransition = pickRandomTransition();
+        transition = _randomTransition;
+      }
+
+      const [type, dir] = transition.split('-');
+      const speed = cfg.crossZoomSpeed ?? 0.5;
+      const flashColor = cfg.flashColor ?? '#ffffff';
+
+      switch (type) {
+        case 'fade':   transitionFade(ctx, slideA, slideB, t, w, h); break;
+        case 'slide':  transitionSlide(ctx, slideA, slideB, t, w, h, dir || 'left'); break;
+        case 'zoom':   transitionZoomPunch(ctx, slideA, slideB, t, w, h); break;
+        case 'wipe':   transitionWipe(ctx, slideA, slideB, t, w, h, dir || 'left'); break;
+        case 'cross':  transitionCrossZoom(ctx, slideA, slideB, t, w, h, speed); break;
+        case 'flash':  transitionFlash(ctx, slideA, slideB, t, w, h, flashColor); break;
+        default:       transitionFade(ctx, slideA, slideB, t, w, h); break;
+      }
+    }
+
     // ── Init ─────────────────────────────────────────────────────────
 
     async function main() {
