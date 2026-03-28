@@ -910,6 +910,7 @@
     // ── Task 5: Playback Engine ──────────────────────────────────────
 
     let _rafId = null;
+    let _webCodecsSupported = typeof VideoEncoder !== 'undefined';
     let _lastTime = null;
     let _slideElapsed = 0;   // segundos transcurridos en el slide actual
     let _transElapsed = 0;   // segundos en la transición
@@ -946,7 +947,7 @@
       document.getElementById('btnPrev').disabled = empty || (!state.config.loop && isFirst);
       document.getElementById('btnNext').disabled = empty || (!state.config.loop && isLast);
       document.getElementById('btnFullscreen').disabled = empty;
-      document.getElementById('btnExport').disabled = empty;
+      document.getElementById('btnExport').disabled = empty || !_webCodecsSupported;
 
       const counter = document.getElementById('slideCounter');
       if (empty) { counter.textContent = '– / –'; }
@@ -1464,6 +1465,7 @@
         state.config.slideDuration = Math.max(0.1, parseFloat(e.target.value) || 3);
         e.target.value = state.config.slideDuration;
         saveProject(state);
+        updateExportEstimate();
       });
       document.getElementById('inputTransDuration').addEventListener('change', e => {
         state.config.transitionDuration = Math.max(0, parseFloat(e.target.value) || 0);
@@ -1532,7 +1534,17 @@
           state.config.aspectRatio = 'custom';
           state.config.customW = p.w;
           state.config.customH = p.h;
-          buildConfigPanels(); // rebuilds UI with new values
+          // Actualizar pills de aspect ratio
+          document.querySelectorAll('#pillAspectRatio .pill').forEach(b =>
+            b.classList.toggle('active', b.dataset.ratio === 'custom')
+          );
+          // Mostrar inputs custom y actualizar valores
+          const rowCustom = document.getElementById('rowCustom');
+          if (rowCustom) rowCustom.style.display = 'flex';
+          const wInput = document.getElementById('inputCustomW');
+          const hInput = document.getElementById('inputCustomH');
+          if (wInput) wInput.value = p.w;
+          if (hInput) hInput.value = p.h;
           updateCanvasSize(); renderFrame(); saveProject(state);
         });
         item.appendChild(apply);
@@ -1623,6 +1635,7 @@
       const label = document.getElementById('compatLabel');
       if (!dot || !label) return;
       const supported = typeof VideoEncoder !== 'undefined';
+      _webCodecsSupported = supported;
       dot.style.background = supported ? 'var(--green)' : 'var(--red)';
       label.textContent = supported ? 'Listo para exportar' : 'Requiere Chrome o Edge';
       document.getElementById('btnExport').disabled = !supported || state.slides.length === 0;
