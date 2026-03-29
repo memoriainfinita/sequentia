@@ -432,6 +432,49 @@
 
     /* Drag cursor when hovering text overlay on canvas */
     #previewCanvas.text-drag { cursor: move; }
+
+    /* Audio section */
+    .audio-drop {
+      border: 2px dashed var(--border); border-radius: 6px;
+      padding: 18px 12px; text-align: center;
+      color: var(--muted); font-size: 12px; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      margin-bottom: 6px; user-select: none;
+    }
+    .audio-drop:hover, .audio-drop.drag-over {
+      border-color: var(--accent); color: var(--accent);
+    }
+    #audioControls { display: none; }
+    .audio-name {
+      font-size: 12px; color: var(--text); font-family: var(--mono);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    #audioSeek { width: 100%; margin-bottom: 8px; }
+    .audio-trim {
+      display: flex; gap: 8px; margin-bottom: 8px;
+    }
+    .audio-trim label {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--muted); flex: 1;
+    }
+    .audio-trim input[type=number] {
+      width: 60px; font-size: 12px; padding: 3px 5px;
+      background: var(--s3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px;
+    }
+    .audio-fade-row {
+      display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+    }
+    .audio-fade-row label {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--muted); flex: 1;
+    }
+    .audio-fade-row input[type=number] {
+      width: 50px; font-size: 12px; padding: 3px 5px;
+      background: var(--s3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -515,7 +558,14 @@
         loop: false,
         watermark: null, frame: null, vignette: 0, vignetteColor: '#000000',
         globalText: { title: '', subtitle: '', font: 'Inter', size: 48, color: '#ffffff', opacity: 1.0, position: { x: 0.5, y: 0.85 }, bgStyle: 'none', bgOpacity: 0.5, animation: 'none', visibleDuration: null },
-        audio: null,
+        audio: {
+          id: null, blobUrl: null, name: null, duration: null,
+          trimIn: 0, trimOut: null,
+          volume: 1.0,
+          fadeIn: false, fadeInDuration: 1.0,
+          fadeOut: false, fadeOutDuration: 1.5,
+          loop: true, muted: false,
+        },
       },
       currentIndex: 0,
       playing: false,
@@ -599,6 +649,20 @@
           frame: state.config.frame ? {
             id: state.config.frame.id,
             opacity: state.config.frame.opacity,
+          } : null,
+          audio: state.config.audio ? {
+            id:              state.config.audio.id,
+            name:            state.config.audio.name,
+            duration:        state.config.audio.duration,
+            trimIn:          state.config.audio.trimIn,
+            trimOut:         state.config.audio.trimOut,
+            volume:          state.config.audio.volume,
+            fadeIn:          state.config.audio.fadeIn,
+            fadeInDuration:  state.config.audio.fadeInDuration,
+            fadeOut:         state.config.audio.fadeOut,
+            fadeOutDuration: state.config.audio.fadeOutDuration,
+            loop:            state.config.audio.loop,
+            muted:           state.config.audio.muted,
           } : null,
         },
         currentIndex: state.currentIndex,
@@ -1105,6 +1169,12 @@
       _lastTime = null;
       _rafId = requestAnimationFrame(_tick);
       updatePlayControls();
+      // Audio sync
+      const audioEl = document.getElementById('audioEl');
+      if (audioEl && state.config.audio?.blobUrl) {
+        audioEl.currentTime = state.config.audio.trimIn ?? 0;
+        audioEl.play().catch(() => {});
+      }
     }
 
     function pause() {
@@ -1112,6 +1182,9 @@
       if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
       _lastTime = null;
       updatePlayControls();
+      // Audio sync
+      const audioEl = document.getElementById('audioEl');
+      if (audioEl) audioEl.pause();
     }
 
     function _tick(now) {
@@ -1817,6 +1890,63 @@
 
       container.appendChild(overlaysSection);
 
+      // --- SECCIÓN AUDIO ---
+      const audioSection = collapsibleSection('audio', 'Audio', '');
+      const audioBody = audioSection.querySelector('.section-body');
+
+      const audioDrop = document.createElement('div');
+      audioDrop.className = 'audio-drop';
+      audioDrop.id = 'audioDrop';
+      audioDrop.textContent = 'MP3 / WAV / OGG — Clic o arrastra aquí';
+
+      const audioInput = document.createElement('input');
+      audioInput.type = 'file';
+      audioInput.id = 'audioInput';
+      audioInput.accept = 'audio/mp3,audio/wav,audio/ogg,audio/*';
+      audioInput.hidden = true;
+
+      const audioControls = document.createElement('div');
+      audioControls.id = 'audioControls';
+      const au = state.config.audio;
+      audioControls.innerHTML = `
+        <div class="audio-name" id="audioName">${au?.name ?? ''}</div>
+        <div class="cfg-row">
+          <span class="cfg-label">Posición</span>
+          <input type="range" id="audioSeek" min="0" max="${au?.duration ?? 100}" step="0.1" value="${au?.trimIn ?? 0}" title="Solo previsualización — la exportación usa Trim In/Out">
+        </div>
+        <div class="audio-trim">
+          <label>Trim In <input type="number" id="audioTrimIn" step="0.1" min="0" value="${au?.trimIn ?? 0}"></label>
+          <label>Trim Out <input type="number" id="audioTrimOut" step="0.1" min="0" value="${au?.trimOut ?? ''}"></label>
+        </div>
+        <div class="cfg-row">
+          <span class="cfg-label">Volumen <span class="cfg-value" id="lblAudioVolume">${(au?.volume ?? 1).toFixed(2)}</span></span>
+          <input type="range" id="audioVolume" min="0" max="1" step="0.01" value="${au?.volume ?? 1}">
+        </div>
+        <div class="audio-fade-row">
+          <label><input type="checkbox" id="audioFadeIn" ${au?.fadeIn ? 'checked' : ''}> Fade In
+            <input type="number" id="audioFadeInDur" step="0.1" min="0.1" value="${au?.fadeInDuration ?? 1}">s
+          </label>
+          <label><input type="checkbox" id="audioFadeOut" ${au?.fadeOut ? 'checked' : ''}> Fade Out
+            <input type="number" id="audioFadeOutDur" step="0.1" min="0.1" value="${au?.fadeOutDuration ?? 1.5}">s
+          </label>
+        </div>
+        <div class="cfg-row" style="margin-top:4px">
+          <button class="btn-ghost" id="audioRemove" style="color:var(--red);border-color:var(--red);font-size:11px;padding:4px 10px">Quitar audio</button>
+        </div>
+      `;
+
+      audioBody.appendChild(audioDrop);
+      audioBody.appendChild(audioInput);
+      audioBody.appendChild(audioControls);
+
+      // Show controls if audio already loaded
+      if (au?.id) {
+        audioDrop.style.display = 'none';
+        audioControls.style.display = 'block';
+      }
+
+      container.appendChild(audioSection);
+
       // Hidden file inputs for overlay uploads
       const wmInput = document.createElement('input');
       wmInput.type = 'file'; wmInput.accept = 'image/png'; wmInput.style.display = 'none'; wmInput.id = 'fileWatermark';
@@ -1826,9 +1956,16 @@
       frameInput.type = 'file'; frameInput.accept = 'image/png'; frameInput.style.display = 'none'; frameInput.id = 'fileFrame';
       document.body.appendChild(frameInput);
 
+      // Audio element (hidden)
+      const audioEl = document.createElement('audio');
+      audioEl.id = 'audioEl';
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+
       // Montar event listeners de los paneles
       bindConfigPanelEvents();
       bindOverlayEvents();
+      bindAudioEvents();
       renderPresets();
       updateTransitionOpts();
       checkWebCodecsSupport();
@@ -2131,6 +2268,180 @@
           state.config.frame = null;
         }
       }
+    }
+
+    async function restoreAudioBlob() {
+      if (!state.config.audio?.id) return;
+      try {
+        const rec = await dbGet('images', state.config.audio.id);
+        if (rec?.blob) {
+          const blobUrl = URL.createObjectURL(rec.blob);
+          state.config.audio.blobUrl = blobUrl;
+          const audioEl = document.getElementById('audioEl');
+          if (audioEl) {
+            audioEl.src = blobUrl;
+            audioEl.volume = state.config.audio.volume ?? 1;
+            audioEl.muted = state.config.audio.muted ?? false;
+          }
+          // Show controls, hide drop zone
+          const drop = document.getElementById('audioDrop');
+          const ctrl = document.getElementById('audioControls');
+          if (drop) drop.style.display = 'none';
+          if (ctrl) ctrl.style.display = 'block';
+        } else {
+          // Blob gone — reset audio state
+          state.config.audio.id = null;
+          state.config.audio.blobUrl = null;
+        }
+      } catch(err) {
+        console.warn('Failed to restore audio blob:', err);
+        state.config.audio.id = null;
+        state.config.audio.blobUrl = null;
+      }
+    }
+
+    function bindAudioEvents() {
+      const audioDrop  = document.getElementById('audioDrop');
+      const audioInput = document.getElementById('audioInput');
+      const audioEl    = document.getElementById('audioEl');
+
+      if (!audioDrop || !audioInput || !audioEl) return;
+
+      // Click drop zone → open file picker
+      audioDrop.addEventListener('click', () => audioInput.click());
+
+      // Drag-over styling
+      audioDrop.addEventListener('dragover', e => { e.preventDefault(); audioDrop.classList.add('drag-over'); });
+      audioDrop.addEventListener('dragleave', () => audioDrop.classList.remove('drag-over'));
+      audioDrop.addEventListener('drop', e => {
+        e.preventDefault();
+        audioDrop.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) handleAudioFile(file);
+      });
+
+      audioInput.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) handleAudioFile(file);
+        e.target.value = '';
+      });
+
+      async function handleAudioFile(file) {
+        if (!file.type.startsWith('audio/')) {
+          showToast('Formato no soportado. Usa MP3, WAV u OGG.', 'error');
+          return;
+        }
+        // Revoke old blobUrl if any
+        if (state.config.audio.blobUrl) URL.revokeObjectURL(state.config.audio.blobUrl);
+
+        const id = 'audio-' + Date.now();
+        await dbPut('images', { id, blob: file, name: file.name });
+
+        const blobUrl = URL.createObjectURL(file);
+        state.config.audio.id      = id;
+        state.config.audio.blobUrl = blobUrl;
+        state.config.audio.name    = file.name;
+        state.config.audio.trimIn  = 0;
+        state.config.audio.trimOut = null;
+
+        // Set up audio element
+        audioEl.src    = blobUrl;
+        audioEl.volume = state.config.audio.volume ?? 1;
+        audioEl.muted  = state.config.audio.muted ?? false;
+
+        // Get duration once metadata loads
+        audioEl.onloadedmetadata = () => {
+          state.config.audio.duration = audioEl.duration;
+          document.getElementById('audioSeek').max = audioEl.duration;
+          document.getElementById('audioTrimOut').value = '';
+          saveProject(state);
+        };
+
+        document.getElementById('audioName').textContent = file.name;
+        document.getElementById('audioSeek').value = 0;
+        document.getElementById('audioTrimIn').value = 0;
+        document.getElementById('audioTrimOut').value = '';
+        document.getElementById('audioVolume').value = state.config.audio.volume;
+        document.getElementById('lblAudioVolume').textContent = state.config.audio.volume.toFixed(2);
+
+        audioDrop.style.display    = 'none';
+        document.getElementById('audioControls').style.display = 'block';
+
+        saveProject(state);
+        showToast('Audio cargado: ' + file.name);
+      }
+
+      // Seek scrubber (preview only)
+      document.getElementById('audioSeek').addEventListener('input', e => {
+        audioEl.currentTime = parseFloat(e.target.value);
+      });
+
+      // Trim In
+      document.getElementById('audioTrimIn').addEventListener('change', e => {
+        state.config.audio.trimIn = parseFloat(e.target.value) || 0;
+        saveProject(state);
+      });
+
+      // Trim Out
+      document.getElementById('audioTrimOut').addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        state.config.audio.trimOut = isNaN(v) ? null : v;
+        saveProject(state);
+      });
+
+      // Volume
+      document.getElementById('audioVolume').addEventListener('input', e => {
+        state.config.audio.volume = parseFloat(e.target.value);
+        audioEl.volume = state.config.audio.volume;
+        document.getElementById('lblAudioVolume').textContent = state.config.audio.volume.toFixed(2);
+        saveProject(state);
+      });
+
+      // Fade In checkbox + duration
+      document.getElementById('audioFadeIn').addEventListener('change', e => {
+        state.config.audio.fadeIn = e.target.checked;
+        saveProject(state);
+      });
+      document.getElementById('audioFadeInDur').addEventListener('change', e => {
+        state.config.audio.fadeInDuration = parseFloat(e.target.value) || 1.0;
+        saveProject(state);
+      });
+
+      // Fade Out checkbox + duration
+      document.getElementById('audioFadeOut').addEventListener('change', e => {
+        state.config.audio.fadeOut = e.target.checked;
+        saveProject(state);
+      });
+      document.getElementById('audioFadeOutDur').addEventListener('change', e => {
+        state.config.audio.fadeOutDuration = parseFloat(e.target.value) || 1.5;
+        saveProject(state);
+      });
+
+      // Remove audio
+      document.getElementById('audioRemove').addEventListener('click', () => {
+        if (state.config.audio.blobUrl) URL.revokeObjectURL(state.config.audio.blobUrl);
+        if (state.config.audio.id) dbDelete('images', state.config.audio.id);
+        audioEl.pause();
+        audioEl.src = '';
+        state.config.audio = {
+          id: null, blobUrl: null, name: null, duration: null,
+          trimIn: 0, trimOut: null, volume: 1.0,
+          fadeIn: false, fadeInDuration: 1.0,
+          fadeOut: false, fadeOutDuration: 1.5,
+          loop: true, muted: false,
+        };
+        document.getElementById('audioControls').style.display = 'none';
+        audioDrop.style.display = '';
+        saveProject(state);
+      });
+
+      // Loop on ended
+      audioEl.addEventListener('ended', () => {
+        if (state.config.audio?.loop && state.playing) {
+          audioEl.currentTime = state.config.audio.trimIn ?? 0;
+          audioEl.play().catch(() => {});
+        }
+      });
     }
 
     function renderPresets() {
@@ -2484,8 +2795,8 @@
           'Escape':   () => { if (document.fullscreenElement) document.exitFullscreen(); },
           'r':        () => { goToSlide(0); play(); },
           'R':        () => { goToSlide(0); play(); },
-          'm':        () => { const a = document.querySelector('audio'); if (a) a.muted = !a.muted; },
-          'M':        () => { const a = document.querySelector('audio'); if (a) a.muted = !a.muted; },
+          'm':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; saveProject(state); } } },
+          'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; saveProject(state); } } },
           't':        () => cycleTransition(),
           'T':        () => cycleTransition(),
         };
@@ -2497,6 +2808,9 @@
 
       // Task 10: Restore overlay images from IndexedDB if present in state.config
       await restoreOverlayImages();
+
+      // Task 11: Restore audio blob from IndexedDB if present in state.config
+      await restoreAudioBlob();
 
       // Task 9 + Task 10: Drag text overlay and watermark on preview canvas
       (function setupCanvasDrag() {
