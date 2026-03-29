@@ -60,6 +60,21 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-29 — Sesión 7: Implementación Tasks 11–12
+**Hecho:**
+- Task 11 (Audio System) completada — sección "Audio" en config panel, `state.config.audio`, `<audio id="audioEl">`, `bindAudioEvents`, `restoreAudioBlob`, sync play/pause, loop, mute (m/M), IndexedDB, serialización sin blobUrl
+- Task 12 (Export Engine) completada — Web Worker en `<script type="text/plain" id="worker-src">`, Mediabunny muxer, WebCodecs VideoEncoder + AudioEncoder, OffscreenCanvas rendering
+- Funciones main-thread: `startExport`, `prepareExportPayload`, `applyAudioSettings`, `downloadMP4`, `resetExportButton`, `playCompletionSound`
+- Worker: `runExport`, `encodeFrame`, `encodeAudio`, `renderSlideWorker`, `drawSlideWorker`, `drawGlobalOverlaysWorker`, `drawTextOverlayWorker`, 6 transiciones worker-side
+- `sequentia.html` ahora ~3620 líneas
+
+**Deuda técnica:**
+- Doble-overlay durante transiciones: worker aplica overlays en cada slide buffer antes de componer. Fix pendiente: `drawSlideWorker` con `{skipOverlays}` + `drawGlobalOverlaysWorker` post-composición.
+
+**Próximo paso:** Task 13 (Persistence — Autosave + JSON export/import)
+
+---
+
 ### 2026-03-29 — Sesión 6: Implementación Task 11
 **Hecho:**
 - Task 11 (Audio System) completada — sección "Audio" en config panel, `state.config.audio` expandido, `<audio id="audioEl">`, `bindAudioEvents()`, `restoreAudioBlob()`, sync play/pause, loop-on-ended, mute (teclado m/M), blob en IndexedDB, serialización sin blobUrl
@@ -141,7 +156,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - [x] Task 9: Text Overlays
   - [x] Task 10: Global Overlays (Watermark, Frame, Vignette)
   - [x] Task 11: Audio System
-  - [ ] Task 12: Export Engine (WebCodecs + Mediabunny)
+  - [x] Task 12: Export Engine (WebCodecs + Mediabunny)
   - [ ] Task 13: Persistence (Autosave + JSON)
   - [ ] Task 14: Undo / Redo Stack
   - [ ] Task 15: Fullscreen Presentation Mode
