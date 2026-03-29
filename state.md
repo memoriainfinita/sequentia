@@ -60,6 +60,16 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-29 — Sesión 10: Implementación Task 15
+**Hecho:**
+- Task 15 (Fullscreen Presentation Mode) completada — `#fullscreenOverlay` en `#previewWrap`, CSS con auto-hide (opacity/pointer-events), `_enterFullscreenUI`/`_exitFullscreenUI`, `_showFsOverlay`/`_hideFsOverlay` con timer 3s, `mousemove` en document, `fullscreenchange` para Escape, botones fsoPrev/fsoPlay/fsoNext/fsoExit, `updatePlayControls()` sincroniza fsoPlay/fsoCounter/fsoProgressBar
+- Audio continúa sin interrupción (enter/exit UI no toca `<audio>`)
+- `sequentia.html` ahora ~3940 líneas
+
+**Próximo paso:** Task 16 (Polish + Edge Cases)
+
+---
+
 ### 2026-03-29 — Sesión 9: Implementación Task 14
 **Hecho:**
 - Task 14 (Undo/Redo) completada — `undoStack`/`redoStack` (máx 50), `pushUndo()`, `undo()`/`redo()` async, `applyStateSnapshot()` async con blob cache + IndexedDB recovery para slides borrados
@@ -185,7 +195,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - [x] Task 12: Export Engine (WebCodecs + Mediabunny)
   - [x] Task 13: Persistence (Autosave + JSON)
   - [x] Task 14: Undo / Redo Stack
-  - [ ] Task 15: Fullscreen Presentation Mode
+  - [x] Task 15: Fullscreen Presentation Mode
   - [ ] Task 16: Polish + Edge Cases
 - [ ] Definir bitrates exactos para presets Bajo/Medio/Alto al llegar al motor de exportación
 - [ ] Botón Dev (exportar todas las combinaciones) — comentado hasta que haga falta
