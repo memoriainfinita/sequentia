@@ -698,6 +698,95 @@
       return await dbGet('project', 'main');
     }
 
+    // ── Task 13: Autosave con debounce ───────────────────────────────
+
+    let _saveTimer = null;
+    function debouncedSave() {
+      clearTimeout(_saveTimer);
+      _saveTimer = setTimeout(() => saveProject(state), 500);
+    }
+
+    // ── Task 13: Restaurar proyecto desde IndexedDB ──────────────────
+
+    async function loadAndRestoreProject() {
+      const saved = await loadProject();
+      if (!saved) return false;
+
+      // Restaurar config con deep merge para campos opcionales
+      state.config = {
+        ...state.config,
+        ...saved.config,
+        audio:      saved.config.audio      ?? state.config.audio      ?? null,
+        watermark:  saved.config.watermark  ?? state.config.watermark  ?? null,
+        frame:      saved.config.frame      ?? state.config.frame      ?? null,
+        globalText: saved.config.globalText ?? state.config.globalText ?? null,
+      };
+
+      // Restaurar slides
+      state.slides = [];
+      for (const slide of (saved.slides || [])) {
+        const rec = await dbGet('images', slide.id);
+        if (rec?.blob) {
+          const blobUrl = URL.createObjectURL(rec.blob);
+          const _bitmap = await createImageBitmap(rec.blob, { imageOrientation: 'from-image' });
+          state.slides.push({ ...slide, blobUrl, _bitmap });
+        } else {
+          state.slides.push({ ...slide, blobUrl: null, _bitmap: null, _missing: true });
+        }
+      }
+
+      // Restaurar índice
+      state.currentIndex = Math.min(saved.currentIndex ?? 0, Math.max(0, state.slides.length - 1));
+
+      // Restaurar overlays y audio
+      await restoreOverlayImages();
+      await restoreAudioBlob();
+
+      // Actualizar UI
+      updateCanvasSize();
+      renderThumbs();
+      renderFrame();
+      updatePlayControls();
+      updateExportEstimate();
+      return true;
+    }
+
+    // ── Task 13: Restaurar estado desde JSON exportado ───────────────
+
+    async function deserializeState(data) {
+      state.config = {
+        ...state.config,
+        ...data.config,
+        audio:      data.config.audio      ?? state.config.audio      ?? null,
+        watermark:  data.config.watermark  ?? state.config.watermark  ?? null,
+        frame:      data.config.frame      ?? state.config.frame      ?? null,
+        globalText: data.config.globalText ?? state.config.globalText ?? null,
+      };
+
+      state.slides = [];
+      for (const slide of (data.slides || [])) {
+        const rec = await dbGet('images', slide.id);
+        if (rec?.blob) {
+          const blobUrl = URL.createObjectURL(rec.blob);
+          const _bitmap = await createImageBitmap(rec.blob, { imageOrientation: 'from-image' });
+          state.slides.push({ ...slide, blobUrl, _bitmap });
+        } else {
+          state.slides.push({ ...slide, blobUrl: null, _bitmap: null, _missing: true });
+        }
+      }
+
+      state.currentIndex = Math.min(data.currentIndex ?? 0, Math.max(0, state.slides.length - 1));
+
+      await restoreOverlayImages();
+      await restoreAudioBlob();
+
+      updateCanvasSize();
+      renderThumbs();
+      renderFrame();
+      updatePlayControls();
+      updateExportEstimate();
+    }
+
     // ── Task 3: Toast ────────────────────────────────────────────────
 
     function showToast(msg, type = 'info') {
@@ -743,7 +832,7 @@
       renderThumbs();
       updateCanvasSize();
       renderFrame();
-      await saveProject(state);
+      debouncedSave();
       updateExportEstimate();
     }
 
@@ -759,7 +848,7 @@
         state.currentIndex = Math.max(0, state.slides.length - 1);
       }
       renderThumbs();
-      saveProject(state);
+      debouncedSave();
     }
 
     // ── Task 3: renderThumbs ─────────────────────────────────────────
@@ -794,9 +883,31 @@
         thumb.dataset.id = slide.id;
         thumb.draggable = true;
 
-        const img = document.createElement('img');
-        img.src = slide.blobUrl;
-        img.loading = 'lazy';
+        let imgEl;
+        if (slide._missing) {
+          // Placeholder para imágenes no disponibles
+          const canvas = document.createElement('canvas');
+          canvas.width = 160;
+          canvas.height = 90;
+          const ctx2 = canvas.getContext('2d');
+          ctx2.fillStyle = '#1a1a1e';
+          ctx2.fillRect(0, 0, 160, 90);
+          ctx2.fillStyle = '#f97316';
+          ctx2.font = 'bold 28px sans-serif';
+          ctx2.textAlign = 'center';
+          ctx2.textBaseline = 'middle';
+          ctx2.fillText('⚠', 80, 38);
+          ctx2.fillStyle = '#71717a';
+          ctx2.font = '10px sans-serif';
+          const name = (slide.name || '').length > 18 ? (slide.name || '').slice(0, 15) + '…' : (slide.name || '');
+          ctx2.fillText(name, 80, 70);
+          imgEl = document.createElement('img');
+          imgEl.src = canvas.toDataURL();
+        } else {
+          imgEl = document.createElement('img');
+          imgEl.src = slide.blobUrl;
+          imgEl.loading = 'lazy';
+        }
 
         const num = document.createElement('span');
         num.className = 'thumb-num';
@@ -807,7 +918,7 @@
         del.textContent = '×';
         del.title = 'Eliminar';
 
-        thumb.appendChild(img);
+        thumb.appendChild(imgEl);
         thumb.appendChild(num);
 
         if (slide.width < res.w || slide.height < res.h) {
@@ -888,7 +999,7 @@
           const [moved] = state.slides.splice(fromIdx, 1);
           state.slides.splice(toIdx, 0, moved);
           renderThumbs();
-          saveProject(state);
+          debouncedSave();
         });
 
         thumb.addEventListener('contextmenu', e => {
@@ -939,7 +1050,7 @@
           bitmap.close();
           await dbPut('images', { id: slide.id, blob, name: file.name, width: slide.width, height: slide.height });
           renderThumbs();
-          await saveProject(state);
+          debouncedSave();
         });
         input.click();
       });
@@ -1834,7 +1945,7 @@
       // Ensure globalText exists
       if (!state.config.globalText) state.config.globalText = makeDefaultText();
       const textControls = buildTextControls(state.config.globalText, () => {
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
       textoBody.appendChild(textControls);
       container.appendChild(textoSection);
@@ -2003,16 +2114,16 @@
         state.config.aspectRatio = btn.dataset.ratio;
         document.querySelectorAll('#pillAspectRatio .pill').forEach(b => b.classList.toggle('active', b.dataset.ratio === state.config.aspectRatio));
         document.getElementById('rowCustom').style.display = state.config.aspectRatio === 'custom' ? 'flex' : 'none';
-        updateCanvasSize(); renderFrame(); saveProject(state);
+        updateCanvasSize(); renderFrame(); debouncedSave();
       });
 
       document.getElementById('inputCustomW').addEventListener('change', e => {
         state.config.customW = parseInt(e.target.value) || 1920;
-        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); saveProject(state); }
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); debouncedSave(); }
       });
       document.getElementById('inputCustomH').addEventListener('change', e => {
         state.config.customH = parseInt(e.target.value) || 1080;
-        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); saveProject(state); }
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); debouncedSave(); }
       });
 
       // Resolution pills
@@ -2021,7 +2132,7 @@
         if (!btn) return;
         state.config.resolution = btn.dataset.res;
         document.querySelectorAll('#pillResolution .pill').forEach(b => b.classList.toggle('active', b.dataset.res === state.config.resolution));
-        updateCanvasSize(); renderFrame(); renderThumbs(); saveProject(state); updateExportEstimate();
+        updateCanvasSize(); renderFrame(); renderThumbs(); debouncedSave(); updateExportEstimate();
       });
 
       // Fit mode pills
@@ -2030,7 +2141,7 @@
         if (!btn) return;
         state.config.fitMode = btn.dataset.fit;
         document.querySelectorAll('#pillFitMode .pill').forEach(b => b.classList.toggle('active', b.dataset.fit === state.config.fitMode));
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
 
       // Preset save
@@ -2048,13 +2159,13 @@
       document.getElementById('sliderBgBlur').addEventListener('input', e => {
         state.config.bgBlur = parseInt(e.target.value);
         document.getElementById('lblBgBlur').textContent = state.config.bgBlur;
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
 
       // Color fondo
       document.getElementById('pickBgColor').addEventListener('input', e => {
         state.config.bgColor = e.target.value;
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
 
       // Imagen personalizada
@@ -2074,31 +2185,31 @@
         const img = document.getElementById('bgImagePreview');
         img.src = url;
         document.getElementById('rowBgImagePreview').style.display = 'flex';
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
         e.target.value = '';
       });
       document.getElementById('btnBgImageRemove').addEventListener('click', () => {
         if (state.config.bgImageId) dbDelete('images', state.config.bgImageId);
         state.config.bgImageId = null;
         document.getElementById('rowBgImagePreview').style.display = 'none';
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
       document.getElementById('sliderBgImageBlur').addEventListener('input', e => {
         state.config.bgImageBlur = parseInt(e.target.value);
-        renderFrame(); saveProject(state);
+        renderFrame(); debouncedSave();
       });
 
       // Timing
       document.getElementById('inputSlideDuration').addEventListener('change', e => {
         state.config.slideDuration = Math.max(0.1, parseFloat(e.target.value) || 3);
         e.target.value = state.config.slideDuration;
-        saveProject(state);
+        debouncedSave();
         updateExportEstimate();
       });
       document.getElementById('inputTransDuration').addEventListener('change', e => {
         state.config.transitionDuration = Math.max(0, parseFloat(e.target.value) || 0);
         e.target.value = state.config.transitionDuration;
-        saveProject(state); updateExportEstimate();
+        debouncedSave(); updateExportEstimate();
       });
 
       // Transición pills
@@ -2108,7 +2219,7 @@
         state.config.transition = btn.dataset.trans;
         document.querySelectorAll('#pillTransition .pill').forEach(b => b.classList.toggle('active', b.dataset.trans === state.config.transition));
         updateTransitionOpts();
-        saveProject(state);
+        debouncedSave();
       });
 
       // FPS
@@ -2117,7 +2228,7 @@
         if (!btn) return;
         state.config.fps = parseInt(btn.dataset.fps);
         document.querySelectorAll('#pillFPS .pill').forEach(b => b.classList.toggle('active', b.dataset.fps == state.config.fps));
-        saveProject(state); updateExportEstimate();
+        debouncedSave(); updateExportEstimate();
       });
 
       // Calidad
@@ -2126,14 +2237,14 @@
         if (!btn) return;
         state.config.quality = btn.dataset.quality;
         document.querySelectorAll('#pillQuality .pill').forEach(b => b.classList.toggle('active', b.dataset.quality === state.config.quality));
-        saveProject(state); updateExportEstimate();
+        debouncedSave(); updateExportEstimate();
       });
 
       // Nombre de archivo
       document.getElementById('inputFilename').addEventListener('change', e => {
         state.config.filename = e.target.value.trim() || 'sequentia';
         e.target.value = state.config.filename;
-        saveProject(state);
+        debouncedSave();
       });
     }
 
@@ -2170,7 +2281,7 @@
         document.getElementById('sliderWmOpacity').value = 1;
         document.getElementById('lblWmOpacity').textContent = '1.00';
         renderFrame();
-        saveProject(state);
+        debouncedSave();
         e.target.value = '';
       });
 
@@ -2181,7 +2292,7 @@
         document.getElementById('btnRemoveWatermark').style.display = 'none';
         document.getElementById('rowWmControls').style.display = 'none';
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       document.getElementById('sliderWmScale').addEventListener('input', e => {
@@ -2189,7 +2300,7 @@
         state.config.watermark.scale = parseFloat(e.target.value);
         document.getElementById('lblWmScale').textContent = Math.round(state.config.watermark.scale * 100) + '%';
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       document.getElementById('sliderWmOpacity').addEventListener('input', e => {
@@ -2197,7 +2308,7 @@
         state.config.watermark.opacity = parseFloat(e.target.value);
         document.getElementById('lblWmOpacity').textContent = state.config.watermark.opacity.toFixed(2);
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       // Frame upload
@@ -2218,7 +2329,7 @@
         document.getElementById('sliderFrameOpacity').value = 1;
         document.getElementById('lblFrameOpacity').textContent = '1.00';
         renderFrame();
-        saveProject(state);
+        debouncedSave();
         e.target.value = '';
       });
 
@@ -2229,7 +2340,7 @@
         document.getElementById('btnRemoveFrame').style.display = 'none';
         document.getElementById('rowFrameControls').style.display = 'none';
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       document.getElementById('sliderFrameOpacity').addEventListener('input', e => {
@@ -2237,7 +2348,7 @@
         state.config.frame.opacity = parseFloat(e.target.value);
         document.getElementById('lblFrameOpacity').textContent = state.config.frame.opacity.toFixed(2);
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       // Vignette
@@ -2245,13 +2356,13 @@
         state.config.vignette = parseFloat(e.target.value);
         document.getElementById('lblVignette').textContent = state.config.vignette.toFixed(2);
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
 
       document.getElementById('pickVignetteColor').addEventListener('input', e => {
         state.config.vignetteColor = e.target.value;
         renderFrame();
-        saveProject(state);
+        debouncedSave();
       });
     }
 
@@ -2382,7 +2493,7 @@
           state.config.audio.duration = audioEl.duration;
           document.getElementById('audioSeek').max = audioEl.duration;
           document.getElementById('audioTrimOut').value = '';
-          saveProject(state);
+          debouncedSave();
         }, { once: true });
 
         document.getElementById('audioName').textContent = file.name;
@@ -2395,7 +2506,7 @@
         audioDrop.style.display    = 'none';
         document.getElementById('audioControls').style.display = 'block';
 
-        saveProject(state);
+        debouncedSave();
         showToast('Audio cargado: ' + file.name);
       }
 
@@ -2407,14 +2518,14 @@
       // Trim In
       document.getElementById('audioTrimIn').addEventListener('change', e => {
         state.config.audio.trimIn = parseFloat(e.target.value) || 0;
-        saveProject(state);
+        debouncedSave();
       });
 
       // Trim Out
       document.getElementById('audioTrimOut').addEventListener('change', e => {
         const v = parseFloat(e.target.value);
         state.config.audio.trimOut = isNaN(v) ? null : v;
-        saveProject(state);
+        debouncedSave();
       });
 
       // Volume — live update on input, save only on change (avoid IndexedDB writes on every tick)
@@ -2424,27 +2535,27 @@
         document.getElementById('lblAudioVolume').textContent = state.config.audio.volume.toFixed(2);
       });
       document.getElementById('audioVolume').addEventListener('change', () => {
-        saveProject(state);
+        debouncedSave();
       });
 
       // Fade In checkbox + duration
       document.getElementById('audioFadeIn').addEventListener('change', e => {
         state.config.audio.fadeIn = e.target.checked;
-        saveProject(state);
+        debouncedSave();
       });
       document.getElementById('audioFadeInDur').addEventListener('change', e => {
         state.config.audio.fadeInDuration = parseFloat(e.target.value) || 1.0;
-        saveProject(state);
+        debouncedSave();
       });
 
       // Fade Out checkbox + duration
       document.getElementById('audioFadeOut').addEventListener('change', e => {
         state.config.audio.fadeOut = e.target.checked;
-        saveProject(state);
+        debouncedSave();
       });
       document.getElementById('audioFadeOutDur').addEventListener('change', e => {
         state.config.audio.fadeOutDuration = parseFloat(e.target.value) || 1.5;
-        saveProject(state);
+        debouncedSave();
       });
 
       // Remove audio
@@ -2462,7 +2573,7 @@
         };
         document.getElementById('audioControls').style.display = 'none';
         audioDrop.style.display = '';
-        saveProject(state);
+        debouncedSave();
       });
 
       // Loop on ended
@@ -2510,7 +2621,7 @@
           const hInput = document.getElementById('inputCustomH');
           if (wInput) wInput.value = p.w;
           if (hInput) hInput.value = p.h;
-          updateCanvasSize(); renderFrame(); saveProject(state);
+          updateCanvasSize(); renderFrame(); debouncedSave();
         });
         item.appendChild(apply);
         item.appendChild(del);
@@ -2538,7 +2649,7 @@
           btn.addEventListener('click', () => {
             state.config.transitionDir = val;
             group.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b.title === val));
-            saveProject(state);
+            debouncedSave();
           });
           group.appendChild(btn);
         });
@@ -2553,7 +2664,7 @@
         document.getElementById('sliderCrossZoom').addEventListener('input', e => {
           state.config.crossZoomSpeed = parseFloat(e.target.value);
           document.getElementById('lblCrossZoom').textContent = state.config.crossZoomSpeed.toFixed(1);
-          saveProject(state);
+          debouncedSave();
         });
       } else if (t === 'flash') {
         const color = state.config.flashColor ?? '#ffffff';
@@ -2564,7 +2675,7 @@
           </div>`;
         document.getElementById('pickFlashColor').addEventListener('input', e => {
           state.config.flashColor = e.target.value;
-          saveProject(state);
+          debouncedSave();
         });
       }
     }
@@ -2657,14 +2768,14 @@
         slide.overrides.duration = isNaN(val) || val <= 0 ? null : val;
         if (!slide.overrides.duration) e.target.value = '';
         renderThumbs();
-        saveProject(state);
+        debouncedSave();
       });
 
       // Transición
       panel.querySelector('.ov-transition').addEventListener('change', e => {
         slide.overrides.transition = e.target.value || null;
         renderThumbs();
-        saveProject(state);
+        debouncedSave();
       });
 
       // Duración de transición individual
@@ -2672,7 +2783,7 @@
         const val = parseFloat(e.target.value);
         slide.overrides.transitionDuration = isNaN(val) || val < 0 ? null : val;
         if (slide.overrides.transitionDuration === null) e.target.value = '';
-        saveProject(state);
+        debouncedSave();
       });
 
       // Texto mode toggle
@@ -2682,7 +2793,7 @@
         textWrap.innerHTML = '';
         if (!slide.overrides.text) slide.overrides.text = makeDefaultText();
         const tc = buildTextControls(slide.overrides.text, () => {
-          renderFrame(); saveProject(state);
+          renderFrame(); debouncedSave();
         });
         textWrap.appendChild(tc);
       }
@@ -2703,7 +2814,7 @@
         }
         renderFrame();
         renderThumbs();
-        saveProject(state);
+        debouncedSave();
       });
 
       // Botón limpiar
@@ -2719,7 +2830,7 @@
           slide.overrides = {};
           _openOverrideId = null;
           renderThumbs();
-          saveProject(state);
+          debouncedSave();
         }
       });
 
@@ -2981,6 +3092,13 @@
       updateCanvasSize();
       updateEmptyState();
 
+      // Task 13: Restaurar proyecto guardado antes de construir paneles
+      const restored = await loadAndRestoreProject().catch(err => {
+        console.error('Error al restaurar proyecto:', err);
+        showToast('Error al restaurar proyecto guardado', 'error');
+        return false;
+      });
+
       // Task 7: Configuration panels
       buildConfigPanels();
 
@@ -3019,6 +3137,39 @@
       // Task 12: Export button
       document.getElementById('btnExport').onclick = () => startExport();
 
+      // Task 13: Export JSON
+      document.getElementById('btnExportJSON').addEventListener('click', () => {
+        const json = JSON.stringify(serializeState(state), null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'sequentia-project.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // Task 13: Import JSON
+      document.getElementById('btnImportJSON').addEventListener('click', () => {
+        if (!confirm('Esto reemplazará el proyecto actual. Las imágenes deben estar disponibles en este dispositivo.')) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.addEventListener('change', async e => {
+          const file = e.target.files[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            await deserializeState(data);
+            showToast('Proyecto importado', 'success');
+          } catch (err) {
+            showToast('Error al importar JSON: ' + err.message, 'error');
+          }
+        });
+        input.click();
+      });
+
       // Task 5: Controles de reproducción
       document.getElementById('btnPlayPause').addEventListener('click', () => {
         state.playing ? pause() : play();
@@ -3036,7 +3187,7 @@
             if (oid !== id) document.getElementById(oid).checked = e.target.checked;
           });
           updatePlayControls();
-          saveProject(state);
+          debouncedSave();
         });
       });
 
@@ -3052,8 +3203,8 @@
           'Escape':   () => { if (document.fullscreenElement) document.exitFullscreen(); },
           'r':        () => { goToSlide(0); play(); },
           'R':        () => { goToSlide(0); play(); },
-          'm':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; saveProject(state); } } },
-          'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; saveProject(state); } } },
+          'm':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; debouncedSave(); } } },
+          'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; debouncedSave(); } } },
           't':        () => cycleTransition(),
           'T':        () => cycleTransition(),
         };
@@ -3063,11 +3214,11 @@
       // Task 5: Inicializar controles
       updatePlayControls();
 
-      // Task 10: Restore overlay images from IndexedDB if present in state.config
-      await restoreOverlayImages();
-
-      // Task 11: Restore audio blob from IndexedDB if present in state.config
-      await restoreAudioBlob();
+      // Task 10 + 11: Restore overlay images and audio blob if not already restored
+      if (!restored) {
+        await restoreOverlayImages();
+        await restoreAudioBlob();
+      }
 
       // Task 9 + Task 10: Drag text overlay and watermark on preview canvas
       (function setupCanvasDrag() {
@@ -3178,7 +3329,7 @@
             dragMode = null;
             canvas.classList.remove('text-drag');
             canvas.style.cursor = '';
-            saveProject(state);
+            debouncedSave();
           }
         }
 
