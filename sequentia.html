@@ -1172,7 +1172,9 @@
       // Audio sync
       const audioEl = document.getElementById('audioEl');
       if (audioEl && state.config.audio?.blobUrl) {
-        audioEl.currentTime = state.config.audio.trimIn ?? 0;
+        if (audioEl.paused && audioEl.currentTime <= (state.config.audio.trimIn ?? 0) + 0.1) {
+          audioEl.currentTime = state.config.audio.trimIn ?? 0;
+        }
         audioEl.play().catch(() => {});
       }
     }
@@ -2282,6 +2284,11 @@
             audioEl.src = blobUrl;
             audioEl.volume = state.config.audio.volume ?? 1;
             audioEl.muted = state.config.audio.muted ?? false;
+            audioEl.addEventListener('loadedmetadata', () => {
+              state.config.audio.duration = audioEl.duration;
+              const seekEl = document.getElementById('audioSeek');
+              if (seekEl) seekEl.max = audioEl.duration;
+            }, { once: true });
           }
           // Show controls, hide drop zone
           const drop = document.getElementById('audioDrop');
@@ -2350,12 +2357,12 @@
         audioEl.muted  = state.config.audio.muted ?? false;
 
         // Get duration once metadata loads
-        audioEl.onloadedmetadata = () => {
+        audioEl.addEventListener('loadedmetadata', () => {
           state.config.audio.duration = audioEl.duration;
           document.getElementById('audioSeek').max = audioEl.duration;
           document.getElementById('audioTrimOut').value = '';
           saveProject(state);
-        };
+        }, { once: true });
 
         document.getElementById('audioName').textContent = file.name;
         document.getElementById('audioSeek').value = 0;
@@ -2389,11 +2396,13 @@
         saveProject(state);
       });
 
-      // Volume
+      // Volume — live update on input, save only on change (avoid IndexedDB writes on every tick)
       document.getElementById('audioVolume').addEventListener('input', e => {
         state.config.audio.volume = parseFloat(e.target.value);
         audioEl.volume = state.config.audio.volume;
         document.getElementById('lblAudioVolume').textContent = state.config.audio.volume.toFixed(2);
+      });
+      document.getElementById('audioVolume').addEventListener('change', () => {
         saveProject(state);
       });
 
