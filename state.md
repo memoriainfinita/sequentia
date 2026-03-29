@@ -62,9 +62,10 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ### 2026-03-29 — Sesión 10: Implementación Task 15
 **Hecho:**
-- Task 15 (Fullscreen Presentation Mode) completada — `#fullscreenOverlay` en `#previewWrap`, CSS con auto-hide (opacity/pointer-events), `_enterFullscreenUI`/`_exitFullscreenUI`, `_showFsOverlay`/`_hideFsOverlay` con timer 3s, `mousemove` en document, `fullscreenchange` para Escape, botones fsoPrev/fsoPlay/fsoNext/fsoExit, `updatePlayControls()` sincroniza fsoPlay/fsoCounter/fsoProgressBar
+- Task 15 (Fullscreen Presentation Mode) completada — `#fullscreenOverlay` en `#previewWrap`, CSS con auto-hide (opacity/pointer-events), `_enterFullscreenUI`/`_exitFullscreenUI`, `_showFsOverlay`/`_hideFsOverlay` con timer 3s, `_onFsMouseMove` attached/detached en enter/exit, `fullscreenchange` para Escape, botones fsoPrev/fsoPlay/fsoNext/fsoExit, `updatePlayControls()` sincroniza fsoPlay/fsoCounter/fsoProgressBar
+- Fixes quality review: guard fullscreen en `updateCanvasSize()`, `clearTimeout` en `_hideFsOverlay`, mousemove attach/detach en lugar de listener permanente
 - Audio continúa sin interrupción (enter/exit UI no toca `<audio>`)
-- `sequentia.html` ahora ~3940 líneas
+- `sequentia.html` ahora ~3960 líneas
 
 **Próximo paso:** Task 16 (Polish + Edge Cases)
 
