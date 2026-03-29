@@ -60,6 +60,19 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-29 — Sesión 9: Implementación Task 14
+**Hecho:**
+- Task 14 (Undo/Redo) completada — `undoStack`/`redoStack` (máx 50), `pushUndo()`, `undo()`/`redo()` async, `applyStateSnapshot()` async con blob cache + IndexedDB recovery para slides borrados
+- `buildTextControls` refactorizado con `onCommit` separado de `onChange` (input → preview, change → commit)
+- Sliders/color pickers: `pushUndo()` solo en `change`, no en `input`
+- `buildConfigPanels()` llamado en `applyStateSnapshot` para sincronizar UI
+- Atajos: Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y
+- Fixes de quality review: audio null fallback, await en undo/redo, recuperación blobs IndexedDB
+
+**Próximo paso:** Task 15 (Fullscreen Presentation Mode)
+
+---
+
 ### 2026-03-29 — Sesión 8: Implementación Task 13
 **Hecho:**
 - Task 13 (Persistence) completada — `debouncedSave()` 500ms, `loadAndRestoreProject()` con restore completo de slides/blobs/overlays/audio desde IndexedDB, `deserializeState()` para import JSON, `btnExportJSON` + `btnImportJSON` con confirm dialog, placeholder `_missing: true` en thumbnails
@@ -171,7 +184,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - [x] Task 11: Audio System
   - [x] Task 12: Export Engine (WebCodecs + Mediabunny)
   - [x] Task 13: Persistence (Autosave + JSON)
-  - [ ] Task 14: Undo / Redo Stack
+  - [x] Task 14: Undo / Redo Stack
   - [ ] Task 15: Fullscreen Presentation Mode
   - [ ] Task 16: Polish + Edge Cases
 - [ ] Definir bitrates exactos para presets Bajo/Medio/Alto al llegar al motor de exportación
