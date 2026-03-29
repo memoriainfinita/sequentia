@@ -60,6 +60,19 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-29 — Sesión 8: Implementación Task 13
+**Hecho:**
+- Task 13 (Persistence) completada — `debouncedSave()` 500ms, `loadAndRestoreProject()` con restore completo de slides/blobs/overlays/audio desde IndexedDB, `deserializeState()` para import JSON, `btnExportJSON` + `btnImportJSON` con confirm dialog, placeholder `_missing: true` en thumbnails
+- Fixes de quality review: return value en `loadAndRestoreProject` para evitar double-call leak, eliminado `await` falso en `debouncedSave`, `updateExportEstimate()` en `deserializeState`, try/catch en startup restore
+- `sequentia.html` ahora ~3820 líneas
+
+**Deuda técnica:**
+- Doble-overlay durante transiciones (heredada de Task 12): worker aplica overlays en cada buffer antes de componer. Fix pendiente.
+
+**Próximo paso:** Task 14 (Undo / Redo Stack)
+
+---
+
 ### 2026-03-29 — Sesión 7: Implementación Tasks 11–12
 **Hecho:**
 - Task 11 (Audio System) completada — sección "Audio" en config panel, `state.config.audio`, `<audio id="audioEl">`, `bindAudioEvents`, `restoreAudioBlob`, sync play/pause, loop, mute (m/M), IndexedDB, serialización sin blobUrl
@@ -157,7 +170,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - [x] Task 10: Global Overlays (Watermark, Frame, Vignette)
   - [x] Task 11: Audio System
   - [x] Task 12: Export Engine (WebCodecs + Mediabunny)
-  - [ ] Task 13: Persistence (Autosave + JSON)
+  - [x] Task 13: Persistence (Autosave + JSON)
   - [ ] Task 14: Undo / Redo Stack
   - [ ] Task 15: Fullscreen Presentation Mode
   - [ ] Task 16: Polish + Edge Cases
