@@ -592,6 +592,82 @@
       playing: false,
     };
 
+    // ── Task 14: Undo / Redo Stack ───────────────────────────────────
+    const undoStack = []; // máx 50 entradas
+    const redoStack = [];
+
+    function pushUndo() {
+      undoStack.push(JSON.stringify(serializeState(state)));
+      if (undoStack.length > 50) undoStack.shift();
+      redoStack.length = 0; // limpiar redo al hacer nueva acción
+    }
+
+    async function undo() {
+      if (undoStack.length === 0) return;
+      redoStack.push(JSON.stringify(serializeState(state)));
+      const prev = JSON.parse(undoStack.pop());
+      await applyStateSnapshot(prev);
+    }
+
+    async function redo() {
+      if (redoStack.length === 0) return;
+      undoStack.push(JSON.stringify(serializeState(state)));
+      const next = JSON.parse(redoStack.pop());
+      await applyStateSnapshot(next);
+    }
+
+    async function applyStateSnapshot(snapshot) {
+      // Preserve current blob references by slide ID
+      const blobCache = {};
+      state.slides.forEach(s => {
+        blobCache[s.id] = { blobUrl: s.blobUrl || null, _bitmap: s._bitmap || null };
+      });
+
+      // Restore config (deep replace nested objects)
+      Object.assign(state.config, snapshot.config);
+      state.config.watermark = snapshot.config.watermark ? { ...snapshot.config.watermark } : null;
+      state.config.frame = snapshot.config.frame ? { ...snapshot.config.frame } : null;
+      state.config.audio = snapshot.config.audio ? { ...snapshot.config.audio } : null;
+      state.config.globalText = snapshot.config.globalText
+        ? { ...snapshot.config.globalText, position: { ...snapshot.config.globalText.position } }
+        : makeDefaultText();
+
+      // Restore slides — reuse cached blobs, mark missing if not found
+      state.slides = snapshot.slides.map(s => ({
+        ...s,
+        blobUrl: blobCache[s.id]?.blobUrl ?? null,
+        _bitmap: blobCache[s.id]?._bitmap ?? null,
+        _missing: !blobCache[s.id]?.blobUrl,
+      }));
+
+      state.currentIndex = Math.max(0, Math.min(snapshot.currentIndex ?? 0, Math.max(0, state.slides.length - 1)));
+
+      // Recover blobs for slides that were deleted (still in IndexedDB)
+      for (const slide of state.slides) {
+        if (slide._missing) {
+          const rec = await dbGet('images', slide.id);
+          if (rec?.blob) {
+            slide.blobUrl = URL.createObjectURL(rec.blob);
+            slide._bitmap = await createImageBitmap(rec.blob, { imageOrientation: 'from-image' });
+            delete slide._missing;
+          }
+        }
+      }
+
+      // Restore overlay img objects (watermark, frame) and audio blob
+      await restoreOverlayImages();
+      await restoreAudioBlob();
+
+      // Update UI — rebuild config panels so all sliders/pills reflect restored state
+      buildConfigPanels();
+      updateCanvasSize();
+      renderThumbs();
+      renderFrame();
+      updatePlayControls();
+      updateExportEstimate();
+      debouncedSave();
+    }
+
     // ── Task 2: IndexedDB Storage Layer ─────────────────────────────
 
     async function openDB() {
@@ -832,7 +908,7 @@
       renderThumbs();
       updateCanvasSize();
       renderFrame();
-      debouncedSave();
+      pushUndo(); debouncedSave();
       updateExportEstimate();
     }
 
@@ -848,7 +924,7 @@
         state.currentIndex = Math.max(0, state.slides.length - 1);
       }
       renderThumbs();
-      debouncedSave();
+      pushUndo(); debouncedSave();
     }
 
     // ── Task 3: renderThumbs ─────────────────────────────────────────
@@ -999,7 +1075,7 @@
           const [moved] = state.slides.splice(fromIdx, 1);
           state.slides.splice(toIdx, 0, moved);
           renderThumbs();
-          debouncedSave();
+          pushUndo(); debouncedSave();
         });
 
         thumb.addEventListener('contextmenu', e => {
@@ -1050,7 +1126,7 @@
           bitmap.close();
           await dbPut('images', { id: slide.id, blob, name: file.name, width: slide.width, height: slide.height });
           renderThumbs();
-          debouncedSave();
+          pushUndo(); debouncedSave();
         });
         input.click();
       });
@@ -1679,7 +1755,9 @@
     }
 
     // Build reusable text controls block bound to a textObj
-    function buildTextControls(textObj, onChange) {
+    function buildTextControls(textObj, onChange, onCommit) {
+      // onCommit: called on slider `change` (mouseup) to push undo; defaults to onChange
+      onCommit = onCommit || onChange;
       const wrap = document.createElement('div');
       wrap.className = 'text-controls';
 
@@ -1746,7 +1824,8 @@
         </div>
       `;
 
-      function update() {
+      // updatePreview: reads text fields and calls onChange (renderFrame only)
+      function updatePreview() {
         textObj.title    = wrap.querySelector('.tc-title').value;
         textObj.subtitle = wrap.querySelector('.tc-subtitle').value;
         textObj.font     = wrap.querySelector('.tc-font').value;
@@ -1756,38 +1835,49 @@
         textObj.visibleDuration = isNaN(durVal) ? null : durVal;
         onChange();
       }
+      // updateCommit: same as updatePreview + pushes undo
+      function updateCommit() { updatePreview(); onCommit(); }
 
-      wrap.querySelector('.tc-title').addEventListener('input', update);
-      wrap.querySelector('.tc-subtitle').addEventListener('input', update);
-      wrap.querySelector('.tc-font').addEventListener('change', update);
-      wrap.querySelector('.tc-color-pick').addEventListener('input', update);
-      wrap.querySelector('.tc-animation').addEventListener('change', update);
-      wrap.querySelector('.tc-duration').addEventListener('change', update);
+      // Text inputs: preview on every keystroke, commit on blur/change
+      wrap.querySelector('.tc-title').addEventListener('input', updatePreview);
+      wrap.querySelector('.tc-title').addEventListener('change', updateCommit);
+      wrap.querySelector('.tc-subtitle').addEventListener('input', updatePreview);
+      wrap.querySelector('.tc-subtitle').addEventListener('change', updateCommit);
+      // Selects and number inputs fire change only on commit — call updateCommit directly
+      wrap.querySelector('.tc-font').addEventListener('change', updateCommit);
+      wrap.querySelector('.tc-color-pick').addEventListener('input', updatePreview);
+      wrap.querySelector('.tc-color-pick').addEventListener('change', updateCommit);
+      wrap.querySelector('.tc-animation').addEventListener('change', updateCommit);
+      wrap.querySelector('.tc-duration').addEventListener('change', updateCommit);
 
+      // Sliders: preview on input, commit on change (mouseup)
       wrap.querySelector('.tc-size').addEventListener('input', e => {
         textObj.size = parseInt(e.target.value);
         wrap.querySelector('.tc-size-val').textContent = textObj.size;
         onChange();
       });
+      wrap.querySelector('.tc-size').addEventListener('change', onCommit);
 
       wrap.querySelector('.tc-opacity').addEventListener('input', e => {
         textObj.opacity = parseFloat(e.target.value);
         wrap.querySelector('.tc-opacity-val').textContent = textObj.opacity.toFixed(2);
         onChange();
       });
+      wrap.querySelector('.tc-opacity').addEventListener('change', onCommit);
 
       wrap.querySelector('.tc-bg-opacity').addEventListener('input', e => {
         textObj.bgOpacity = parseFloat(e.target.value);
         wrap.querySelector('.tc-bgopacity-val').textContent = textObj.bgOpacity.toFixed(2);
         onChange();
       });
+      wrap.querySelector('.tc-bg-opacity').addEventListener('change', onCommit);
 
       wrap.querySelector('.tc-bg-options').addEventListener('click', e => {
         const btn = e.target.closest('[data-bg]');
         if (!btn) return;
         textObj.bgStyle = btn.dataset.bg;
         wrap.querySelectorAll('.tc-bg-options .pill').forEach(b => b.classList.toggle('active', b.dataset.bg === textObj.bgStyle));
-        onChange();
+        onChange(); onCommit();
       });
 
       wrap.querySelector('.tc-pos-x').addEventListener('input', e => {
@@ -1795,12 +1885,14 @@
         wrap.querySelector('.tc-pos-x-val').textContent = textObj.position.x.toFixed(2);
         onChange();
       });
+      wrap.querySelector('.tc-pos-x').addEventListener('change', onCommit);
 
       wrap.querySelector('.tc-pos-y').addEventListener('input', e => {
         textObj.position.y = parseFloat(e.target.value);
         wrap.querySelector('.tc-pos-y-val').textContent = textObj.position.y.toFixed(2);
         onChange();
       });
+      wrap.querySelector('.tc-pos-y').addEventListener('change', onCommit);
 
       return wrap;
     }
@@ -1944,9 +2036,9 @@
       const textoBody = textoSection.querySelector('.section-body');
       // Ensure globalText exists
       if (!state.config.globalText) state.config.globalText = makeDefaultText();
-      const textControls = buildTextControls(state.config.globalText, () => {
-        renderFrame(); debouncedSave();
-      });
+      const textControls = buildTextControls(state.config.globalText,
+        () => { renderFrame(); },
+        () => { pushUndo(); debouncedSave(); });
       textoBody.appendChild(textControls);
       container.appendChild(textoSection);
 
@@ -2114,16 +2206,16 @@
         state.config.aspectRatio = btn.dataset.ratio;
         document.querySelectorAll('#pillAspectRatio .pill').forEach(b => b.classList.toggle('active', b.dataset.ratio === state.config.aspectRatio));
         document.getElementById('rowCustom').style.display = state.config.aspectRatio === 'custom' ? 'flex' : 'none';
-        updateCanvasSize(); renderFrame(); debouncedSave();
+        updateCanvasSize(); renderFrame(); pushUndo(); debouncedSave();
       });
 
       document.getElementById('inputCustomW').addEventListener('change', e => {
         state.config.customW = parseInt(e.target.value) || 1920;
-        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); debouncedSave(); }
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); pushUndo(); debouncedSave(); }
       });
       document.getElementById('inputCustomH').addEventListener('change', e => {
         state.config.customH = parseInt(e.target.value) || 1080;
-        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); debouncedSave(); }
+        if (state.config.aspectRatio === 'custom') { updateCanvasSize(); renderFrame(); pushUndo(); debouncedSave(); }
       });
 
       // Resolution pills
@@ -2132,7 +2224,7 @@
         if (!btn) return;
         state.config.resolution = btn.dataset.res;
         document.querySelectorAll('#pillResolution .pill').forEach(b => b.classList.toggle('active', b.dataset.res === state.config.resolution));
-        updateCanvasSize(); renderFrame(); renderThumbs(); debouncedSave(); updateExportEstimate();
+        updateCanvasSize(); renderFrame(); renderThumbs(); pushUndo(); debouncedSave(); updateExportEstimate();
       });
 
       // Fit mode pills
@@ -2141,7 +2233,7 @@
         if (!btn) return;
         state.config.fitMode = btn.dataset.fit;
         document.querySelectorAll('#pillFitMode .pill').forEach(b => b.classList.toggle('active', b.dataset.fit === state.config.fitMode));
-        renderFrame(); debouncedSave();
+        renderFrame(); pushUndo(); debouncedSave();
       });
 
       // Preset save
@@ -2159,14 +2251,16 @@
       document.getElementById('sliderBgBlur').addEventListener('input', e => {
         state.config.bgBlur = parseInt(e.target.value);
         document.getElementById('lblBgBlur').textContent = state.config.bgBlur;
-        renderFrame(); debouncedSave();
+        renderFrame();
       });
+      document.getElementById('sliderBgBlur').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       // Color fondo
       document.getElementById('pickBgColor').addEventListener('input', e => {
         state.config.bgColor = e.target.value;
-        renderFrame(); debouncedSave();
+        renderFrame();
       });
+      document.getElementById('pickBgColor').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       // Imagen personalizada
       document.getElementById('btnBgImage').addEventListener('click', () => {
@@ -2185,31 +2279,32 @@
         const img = document.getElementById('bgImagePreview');
         img.src = url;
         document.getElementById('rowBgImagePreview').style.display = 'flex';
-        renderFrame(); debouncedSave();
+        renderFrame(); pushUndo(); debouncedSave();
         e.target.value = '';
       });
       document.getElementById('btnBgImageRemove').addEventListener('click', () => {
         if (state.config.bgImageId) dbDelete('images', state.config.bgImageId);
         state.config.bgImageId = null;
         document.getElementById('rowBgImagePreview').style.display = 'none';
-        renderFrame(); debouncedSave();
+        renderFrame(); pushUndo(); debouncedSave();
       });
       document.getElementById('sliderBgImageBlur').addEventListener('input', e => {
         state.config.bgImageBlur = parseInt(e.target.value);
-        renderFrame(); debouncedSave();
+        renderFrame();
       });
+      document.getElementById('sliderBgImageBlur').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       // Timing
       document.getElementById('inputSlideDuration').addEventListener('change', e => {
         state.config.slideDuration = Math.max(0.1, parseFloat(e.target.value) || 3);
         e.target.value = state.config.slideDuration;
-        debouncedSave();
+        pushUndo(); debouncedSave();
         updateExportEstimate();
       });
       document.getElementById('inputTransDuration').addEventListener('change', e => {
         state.config.transitionDuration = Math.max(0, parseFloat(e.target.value) || 0);
         e.target.value = state.config.transitionDuration;
-        debouncedSave(); updateExportEstimate();
+        pushUndo(); debouncedSave(); updateExportEstimate();
       });
 
       // Transición pills
@@ -2219,7 +2314,7 @@
         state.config.transition = btn.dataset.trans;
         document.querySelectorAll('#pillTransition .pill').forEach(b => b.classList.toggle('active', b.dataset.trans === state.config.transition));
         updateTransitionOpts();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // FPS
@@ -2228,7 +2323,7 @@
         if (!btn) return;
         state.config.fps = parseInt(btn.dataset.fps);
         document.querySelectorAll('#pillFPS .pill').forEach(b => b.classList.toggle('active', b.dataset.fps == state.config.fps));
-        debouncedSave(); updateExportEstimate();
+        pushUndo(); debouncedSave(); updateExportEstimate();
       });
 
       // Calidad
@@ -2237,14 +2332,14 @@
         if (!btn) return;
         state.config.quality = btn.dataset.quality;
         document.querySelectorAll('#pillQuality .pill').forEach(b => b.classList.toggle('active', b.dataset.quality === state.config.quality));
-        debouncedSave(); updateExportEstimate();
+        pushUndo(); debouncedSave(); updateExportEstimate();
       });
 
       // Nombre de archivo
       document.getElementById('inputFilename').addEventListener('change', e => {
         state.config.filename = e.target.value.trim() || 'sequentia';
         e.target.value = state.config.filename;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
     }
 
@@ -2281,7 +2376,7 @@
         document.getElementById('sliderWmOpacity').value = 1;
         document.getElementById('lblWmOpacity').textContent = '1.00';
         renderFrame();
-        debouncedSave();
+        pushUndo(); debouncedSave();
         e.target.value = '';
       });
 
@@ -2292,7 +2387,7 @@
         document.getElementById('btnRemoveWatermark').style.display = 'none';
         document.getElementById('rowWmControls').style.display = 'none';
         renderFrame();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       document.getElementById('sliderWmScale').addEventListener('input', e => {
@@ -2300,16 +2395,16 @@
         state.config.watermark.scale = parseFloat(e.target.value);
         document.getElementById('lblWmScale').textContent = Math.round(state.config.watermark.scale * 100) + '%';
         renderFrame();
-        debouncedSave();
       });
+      document.getElementById('sliderWmScale').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       document.getElementById('sliderWmOpacity').addEventListener('input', e => {
         if (!state.config.watermark) return;
         state.config.watermark.opacity = parseFloat(e.target.value);
         document.getElementById('lblWmOpacity').textContent = state.config.watermark.opacity.toFixed(2);
         renderFrame();
-        debouncedSave();
       });
+      document.getElementById('sliderWmOpacity').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       // Frame upload
       document.getElementById('btnUploadFrame').addEventListener('click', () => {
@@ -2329,7 +2424,7 @@
         document.getElementById('sliderFrameOpacity').value = 1;
         document.getElementById('lblFrameOpacity').textContent = '1.00';
         renderFrame();
-        debouncedSave();
+        pushUndo(); debouncedSave();
         e.target.value = '';
       });
 
@@ -2340,7 +2435,7 @@
         document.getElementById('btnRemoveFrame').style.display = 'none';
         document.getElementById('rowFrameControls').style.display = 'none';
         renderFrame();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       document.getElementById('sliderFrameOpacity').addEventListener('input', e => {
@@ -2348,22 +2443,22 @@
         state.config.frame.opacity = parseFloat(e.target.value);
         document.getElementById('lblFrameOpacity').textContent = state.config.frame.opacity.toFixed(2);
         renderFrame();
-        debouncedSave();
       });
+      document.getElementById('sliderFrameOpacity').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       // Vignette
       document.getElementById('sliderVignette').addEventListener('input', e => {
         state.config.vignette = parseFloat(e.target.value);
         document.getElementById('lblVignette').textContent = state.config.vignette.toFixed(2);
         renderFrame();
-        debouncedSave();
       });
+      document.getElementById('sliderVignette').addEventListener('change', () => { pushUndo(); debouncedSave(); });
 
       document.getElementById('pickVignetteColor').addEventListener('input', e => {
         state.config.vignetteColor = e.target.value;
         renderFrame();
-        debouncedSave();
       });
+      document.getElementById('pickVignetteColor').addEventListener('change', () => { pushUndo(); debouncedSave(); });
     }
 
     // Restore watermark and frame img objects from IndexedDB blobs
@@ -2493,7 +2588,7 @@
           state.config.audio.duration = audioEl.duration;
           document.getElementById('audioSeek').max = audioEl.duration;
           document.getElementById('audioTrimOut').value = '';
-          debouncedSave();
+          pushUndo(); debouncedSave();
         }, { once: true });
 
         document.getElementById('audioName').textContent = file.name;
@@ -2506,7 +2601,7 @@
         audioDrop.style.display    = 'none';
         document.getElementById('audioControls').style.display = 'block';
 
-        debouncedSave();
+        pushUndo(); debouncedSave();
         showToast('Audio cargado: ' + file.name);
       }
 
@@ -2518,14 +2613,14 @@
       // Trim In
       document.getElementById('audioTrimIn').addEventListener('change', e => {
         state.config.audio.trimIn = parseFloat(e.target.value) || 0;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Trim Out
       document.getElementById('audioTrimOut').addEventListener('change', e => {
         const v = parseFloat(e.target.value);
         state.config.audio.trimOut = isNaN(v) ? null : v;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Volume — live update on input, save only on change (avoid IndexedDB writes on every tick)
@@ -2535,27 +2630,27 @@
         document.getElementById('lblAudioVolume').textContent = state.config.audio.volume.toFixed(2);
       });
       document.getElementById('audioVolume').addEventListener('change', () => {
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Fade In checkbox + duration
       document.getElementById('audioFadeIn').addEventListener('change', e => {
         state.config.audio.fadeIn = e.target.checked;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
       document.getElementById('audioFadeInDur').addEventListener('change', e => {
         state.config.audio.fadeInDuration = parseFloat(e.target.value) || 1.0;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Fade Out checkbox + duration
       document.getElementById('audioFadeOut').addEventListener('change', e => {
         state.config.audio.fadeOut = e.target.checked;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
       document.getElementById('audioFadeOutDur').addEventListener('change', e => {
         state.config.audio.fadeOutDuration = parseFloat(e.target.value) || 1.5;
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Remove audio
@@ -2573,7 +2668,7 @@
         };
         document.getElementById('audioControls').style.display = 'none';
         audioDrop.style.display = '';
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Loop on ended
@@ -2621,7 +2716,7 @@
           const hInput = document.getElementById('inputCustomH');
           if (wInput) wInput.value = p.w;
           if (hInput) hInput.value = p.h;
-          updateCanvasSize(); renderFrame(); debouncedSave();
+          updateCanvasSize(); renderFrame(); pushUndo(); debouncedSave();
         });
         item.appendChild(apply);
         item.appendChild(del);
@@ -2649,7 +2744,7 @@
           btn.addEventListener('click', () => {
             state.config.transitionDir = val;
             group.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b.title === val));
-            debouncedSave();
+            pushUndo(); debouncedSave();
           });
           group.appendChild(btn);
         });
@@ -2664,8 +2759,8 @@
         document.getElementById('sliderCrossZoom').addEventListener('input', e => {
           state.config.crossZoomSpeed = parseFloat(e.target.value);
           document.getElementById('lblCrossZoom').textContent = state.config.crossZoomSpeed.toFixed(1);
-          debouncedSave();
         });
+        document.getElementById('sliderCrossZoom').addEventListener('change', () => { pushUndo(); debouncedSave(); });
       } else if (t === 'flash') {
         const color = state.config.flashColor ?? '#ffffff';
         opts.innerHTML = `
@@ -2675,8 +2770,8 @@
           </div>`;
         document.getElementById('pickFlashColor').addEventListener('input', e => {
           state.config.flashColor = e.target.value;
-          debouncedSave();
         });
+        document.getElementById('pickFlashColor').addEventListener('change', () => { pushUndo(); debouncedSave(); });
       }
     }
 
@@ -2768,14 +2863,14 @@
         slide.overrides.duration = isNaN(val) || val <= 0 ? null : val;
         if (!slide.overrides.duration) e.target.value = '';
         renderThumbs();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Transición
       panel.querySelector('.ov-transition').addEventListener('change', e => {
         slide.overrides.transition = e.target.value || null;
         renderThumbs();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Duración de transición individual
@@ -2783,7 +2878,7 @@
         const val = parseFloat(e.target.value);
         slide.overrides.transitionDuration = isNaN(val) || val < 0 ? null : val;
         if (slide.overrides.transitionDuration === null) e.target.value = '';
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Texto mode toggle
@@ -2792,9 +2887,9 @@
       function attachOwnTextControls() {
         textWrap.innerHTML = '';
         if (!slide.overrides.text) slide.overrides.text = makeDefaultText();
-        const tc = buildTextControls(slide.overrides.text, () => {
-          renderFrame(); debouncedSave();
-        });
+        const tc = buildTextControls(slide.overrides.text,
+          () => { renderFrame(); },
+          () => { pushUndo(); debouncedSave(); });
         textWrap.appendChild(tc);
       }
 
@@ -2814,7 +2909,7 @@
         }
         renderFrame();
         renderThumbs();
-        debouncedSave();
+        pushUndo(); debouncedSave();
       });
 
       // Botón limpiar
@@ -2830,7 +2925,7 @@
           slide.overrides = {};
           _openOverrideId = null;
           renderThumbs();
-          debouncedSave();
+          pushUndo(); debouncedSave();
         }
       });
 
@@ -3187,13 +3282,19 @@
             if (oid !== id) document.getElementById(oid).checked = e.target.checked;
           });
           updatePlayControls();
-          debouncedSave();
+          pushUndo(); debouncedSave();
         });
       });
 
       // Task 5: Atajos de teclado
       document.addEventListener('keydown', e => {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+
+        // Undo/redo — check before map
+        if (e.ctrlKey && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); return; }
+        if (e.ctrlKey && e.shiftKey && e.key === 'z')  { e.preventDefault(); redo(); return; }
+        if (e.ctrlKey && e.key === 'y')                 { e.preventDefault(); redo(); return; }
+
         const map = {
           ArrowLeft:  () => goToSlide(state.currentIndex - 1),
           ArrowRight: () => goToSlide(state.currentIndex + 1),
@@ -3203,8 +3304,8 @@
           'Escape':   () => { if (document.fullscreenElement) document.exitFullscreen(); },
           'r':        () => { goToSlide(0); play(); },
           'R':        () => { goToSlide(0); play(); },
-          'm':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; debouncedSave(); } } },
-          'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; debouncedSave(); } } },
+          'm':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; pushUndo(); debouncedSave(); } } },
+          'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; pushUndo(); debouncedSave(); } } },
           't':        () => cycleTransition(),
           'T':        () => cycleTransition(),
         };
@@ -3329,7 +3430,7 @@
             dragMode = null;
             canvas.classList.remove('text-drag');
             canvas.style.cursor = '';
-            debouncedSave();
+            pushUndo(); debouncedSave();
           }
         }
 
