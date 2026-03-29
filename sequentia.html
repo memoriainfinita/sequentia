@@ -2753,10 +2753,12 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
     function resetExportButton() {
       const btn = document.getElementById('btnExport');
+      btn.disabled = false;
       btn.classList.remove('exporting');
       btn.innerHTML = 'Exportar Video';
       btn.onclick = () => startExport();
@@ -2785,37 +2787,37 @@
 
       const response = await fetch(audioCfg.blobUrl);
       const arrayBuffer = await response.arrayBuffer();
-      const decodeCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+      const decodeCtx = new OfflineAudioContext(2, 1, sampleRate);
       const decoded = await decodeCtx.decodeAudioData(arrayBuffer);
 
       const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+
+      // Master gain node for fade in/out — all sources route through this
+      const masterGain = offlineCtx.createGain();
+      masterGain.gain.value = audioCfg.volume ?? 1.0;
+
+      if (audioCfg.fadeIn) {
+        const fadeInDur = audioCfg.fadeInDuration ?? 1.0;
+        masterGain.gain.setValueAtTime(0, 0);
+        masterGain.gain.linearRampToValueAtTime(audioCfg.volume ?? 1.0, fadeInDur);
+      }
+      if (audioCfg.fadeOut) {
+        const fadeOutDur = audioCfg.fadeOutDuration ?? 1.5;
+        const fadeStart = Math.max(0, videoDuration - fadeOutDur);
+        masterGain.gain.setValueAtTime(audioCfg.volume ?? 1.0, fadeStart);
+        masterGain.gain.linearRampToValueAtTime(0, videoDuration);
+      }
+      masterGain.connect(offlineCtx.destination);
+
       const trimIn = audioCfg.trimIn ?? 0;
       const trimOut = audioCfg.trimOut ?? decoded.duration;
-      const clipDuration = trimOut - trimIn;
+      const clipDuration = Math.max(0.001, trimOut - trimIn);
 
       let offset = 0;
       while (offset < videoDuration) {
         const source = offlineCtx.createBufferSource();
         source.buffer = decoded;
-        const gainNode = offlineCtx.createGain();
-        gainNode.gain.value = audioCfg.volume ?? 1.0;
-
-        if (audioCfg.fadeIn && offset === 0) {
-          const fadeInDur = audioCfg.fadeInDuration ?? 1.0;
-          gainNode.gain.setValueAtTime(0, 0);
-          gainNode.gain.linearRampToValueAtTime(audioCfg.volume ?? 1.0, fadeInDur);
-        }
-        if (audioCfg.fadeOut) {
-          const fadeOutDur = audioCfg.fadeOutDuration ?? 1.5;
-          const fadeStart = videoDuration - fadeOutDur;
-          if (fadeStart > 0) {
-            gainNode.gain.setValueAtTime(audioCfg.volume ?? 1.0, fadeStart);
-            gainNode.gain.linearRampToValueAtTime(0, videoDuration);
-          }
-        }
-
-        source.connect(gainNode);
-        gainNode.connect(offlineCtx.destination);
+        source.connect(masterGain);
         source.start(offset, trimIn, Math.min(clipDuration, videoDuration - offset));
         offset += clipDuration;
         if (!audioCfg.loop) break;
@@ -2893,12 +2895,14 @@
     async function startExport() {
       if (state.slides.length === 0) return;
 
+      const btn = document.getElementById('btnExport');
+      btn.disabled = true;
+
       const workerSrc = document.getElementById('worker-src').textContent;
       const blob = new Blob([workerSrc], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
       const worker = new Worker(workerUrl, { type: 'module' });
 
-      const btn = document.getElementById('btnExport');
       const indicator = document.getElementById('indicator');
 
       btn.classList.add('exporting');
@@ -2917,6 +2921,7 @@
       } catch (err) {
         showToast('Error preparando exportación: ' + err.message, 'error');
         resetExportButton();
+        worker.terminate();
         URL.revokeObjectURL(workerUrl);
         return;
       }
@@ -2924,6 +2929,7 @@
       worker.onerror = (e) => {
         showToast('Error en worker: ' + e.message, 'error');
         resetExportButton();
+        worker.terminate();
         URL.revokeObjectURL(workerUrl);
       };
 
@@ -2941,17 +2947,20 @@
           downloadMP4(e.data.buffer, state.config.filename || 'sequentia');
           showToast(`${state.config.filename || 'sequentia'}.mp4 · ${sizeStr} · ${elapsed}s`, 'success');
           resetExportButton();
+          worker.terminate();
           URL.revokeObjectURL(workerUrl);
           playCompletionSound();
         }
         if (e.data.type === 'cancelled') {
           showToast('Exportación cancelada', 'info');
           resetExportButton();
+          worker.terminate();
           URL.revokeObjectURL(workerUrl);
         }
         if (e.data.type === 'error') {
           showToast('Error en exportación: ' + e.data.msg, 'error');
           resetExportButton();
+          worker.terminate();
           URL.revokeObjectURL(workerUrl);
         }
       };
@@ -3287,16 +3296,16 @@ async function encodeAudio(muxer, audioData, totalSamples) {
   while (offset < totalSamples) {
     const end = Math.min(offset + CHUNK_SIZE, totalSamples);
     const size = end - offset;
+    const data = new Float32Array(size * 2);
+    data.set(left.subarray(offset, end), 0);
+    data.set(right.subarray(offset, end), size);
     const audioFrame = new AudioData({
       format: 'f32-planar',
       sampleRate,
       numberOfFrames: size,
       numberOfChannels: 2,
       timestamp: audioTimestamp,
-      data: new Float32Array([
-        ...left.slice(offset, end),
-        ...right.slice(offset, end),
-      ]),
+      data,
     });
     audioEncoder.encode(audioFrame);
     audioFrame.close();
