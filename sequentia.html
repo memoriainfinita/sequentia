@@ -96,6 +96,27 @@
       background: var(--accent2);
     }
 
+    .btn-export.exporting {
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      min-width: 140px;
+    }
+
+    .export-progress-bar {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 0%;
+      background: rgba(249, 115, 22, 0.3);
+      transition: width 0.2s;
+      pointer-events: none;
+    }
+
+    #exportProgressLabel {
+      position: relative;
+      z-index: 1;
+    }
+
     .btn-ghost {
       background: transparent;
       color: var(--muted);
@@ -2723,6 +2744,221 @@
       }
     }
 
+    // ── Task 12: Export Engine ───────────────────────────────────────
+
+    function downloadMP4(buffer, filename) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([buffer], { type: 'video/mp4' }));
+      a.download = (filename || 'sequentia') + '.mp4';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    function resetExportButton() {
+      const btn = document.getElementById('btnExport');
+      btn.classList.remove('exporting');
+      btn.innerHTML = 'Exportar Video';
+      btn.onclick = () => startExport();
+      document.getElementById('indicator').className = state.playing ? 'indicator live' : 'indicator';
+      updatePlayControls();
+    }
+
+    function playCompletionSound() {
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 440;
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } catch (e) { /* ignore */ }
+    }
+
+    async function applyAudioSettings(audioCfg, videoDuration) {
+      const sampleRate = 44100;
+      const totalSamples = Math.ceil(videoDuration * sampleRate);
+
+      const response = await fetch(audioCfg.blobUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const decodeCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+      const decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+
+      const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+      const trimIn = audioCfg.trimIn ?? 0;
+      const trimOut = audioCfg.trimOut ?? decoded.duration;
+      const clipDuration = trimOut - trimIn;
+
+      let offset = 0;
+      while (offset < videoDuration) {
+        const source = offlineCtx.createBufferSource();
+        source.buffer = decoded;
+        const gainNode = offlineCtx.createGain();
+        gainNode.gain.value = audioCfg.volume ?? 1.0;
+
+        if (audioCfg.fadeIn && offset === 0) {
+          const fadeInDur = audioCfg.fadeInDuration ?? 1.0;
+          gainNode.gain.setValueAtTime(0, 0);
+          gainNode.gain.linearRampToValueAtTime(audioCfg.volume ?? 1.0, fadeInDur);
+        }
+        if (audioCfg.fadeOut) {
+          const fadeOutDur = audioCfg.fadeOutDuration ?? 1.5;
+          const fadeStart = videoDuration - fadeOutDur;
+          if (fadeStart > 0) {
+            gainNode.gain.setValueAtTime(audioCfg.volume ?? 1.0, fadeStart);
+            gainNode.gain.linearRampToValueAtTime(0, videoDuration);
+          }
+        }
+
+        source.connect(gainNode);
+        gainNode.connect(offlineCtx.destination);
+        source.start(offset, trimIn, Math.min(clipDuration, videoDuration - offset));
+        offset += clipDuration;
+        if (!audioCfg.loop) break;
+      }
+
+      const rendered = await offlineCtx.startRendering();
+      return {
+        left: rendered.getChannelData(0).slice(),
+        right: rendered.numberOfChannels > 1 ? rendered.getChannelData(1).slice() : rendered.getChannelData(0).slice(),
+        sampleRate,
+      };
+    }
+
+    async function prepareExportPayload(state) {
+      const { w, h } = getCanvasDimensions();
+      const fps = state.config.fps;
+      const bitrates = {
+        low:    { '720p': 2_000_000, '1080p': 4_000_000 },
+        medium: { '720p': 4_000_000, '1080p': 8_000_000 },
+        high:   { '720p': 8_000_000, '1080p': 16_000_000 },
+      };
+      const bitrate = (bitrates[state.config.quality] || bitrates.medium)[state.config.resolution] || 8_000_000;
+
+      const slides = await Promise.all(state.slides.map(async (slide) => {
+        const bitmap = slide._bitmap ?? await createImageBitmap(
+          await (await fetch(slide.blobUrl)).blob(),
+          { imageOrientation: 'from-image' }
+        );
+        return {
+          bitmap,
+          duration: slide.overrides?.duration ?? state.config.slideDuration,
+          transition: getEffectiveTransition(slide),
+          textObj: getEffectiveText(slide),
+          overrides: slide.overrides ?? {},
+        };
+      }));
+
+      const cfg = state.config;
+      const workerConfig = {
+        w, h, fps, bitrate,
+        transitionDuration: cfg.transitionDuration,
+        bgColor: cfg.bgColor,
+        bgBlur: cfg.bgBlur,
+        fitMode: cfg.fitMode,
+        crossZoomSpeed: cfg.crossZoomSpeed ?? 0.5,
+        flashColor: cfg.flashColor ?? '#ffffff',
+        vignette: cfg.vignette ?? 0,
+        vignetteColor: cfg.vignetteColor ?? '#000000',
+        watermarkBitmap: cfg.watermark?.img ? await createImageBitmap(cfg.watermark.img) : null,
+        watermarkScale: cfg.watermark?.scale ?? 0.2,
+        watermarkOpacity: cfg.watermark?.opacity ?? 1,
+        watermarkX: cfg.watermark?.x ?? 0.5,
+        watermarkY: cfg.watermark?.y ?? 0.5,
+        frameBitmap: cfg.frame?.img ? await createImageBitmap(cfg.frame.img) : null,
+        frameOpacity: cfg.frame?.opacity ?? 1,
+      };
+
+      let audioData = null;
+      if (cfg.audio?.blobUrl && !cfg.audio.muted) {
+        const videoDuration = slides.reduce((s, sl) => s + sl.duration, 0)
+          + Math.max(0, slides.length - 1) * cfg.transitionDuration;
+        audioData = await applyAudioSettings(cfg.audio, videoDuration);
+      }
+
+      const transferables = slides.map(s => s.bitmap).filter(Boolean);
+      if (workerConfig.watermarkBitmap) transferables.push(workerConfig.watermarkBitmap);
+      if (workerConfig.frameBitmap) transferables.push(workerConfig.frameBitmap);
+      if (audioData) {
+        transferables.push(audioData.left.buffer, audioData.right.buffer);
+      }
+
+      return { payload: { slides, config: workerConfig, audioData }, transferables };
+    }
+
+    async function startExport() {
+      if (state.slides.length === 0) return;
+
+      const workerSrc = document.getElementById('worker-src').textContent;
+      const blob = new Blob([workerSrc], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      const worker = new Worker(workerUrl, { type: 'module' });
+
+      const btn = document.getElementById('btnExport');
+      const indicator = document.getElementById('indicator');
+
+      btn.classList.add('exporting');
+      btn.innerHTML = '<div class="export-progress-bar" id="exportProgressBar"></div><span id="exportProgressLabel">0%</span>';
+      indicator.className = 'indicator recording';
+
+      const t0 = performance.now();
+
+      btn.onclick = () => {
+        worker.postMessage({ type: 'cancel' });
+      };
+
+      let payload, transferables;
+      try {
+        ({ payload, transferables } = await prepareExportPayload(state));
+      } catch (err) {
+        showToast('Error preparando exportación: ' + err.message, 'error');
+        resetExportButton();
+        URL.revokeObjectURL(workerUrl);
+        return;
+      }
+
+      worker.onerror = (e) => {
+        showToast('Error en worker: ' + e.message, 'error');
+        resetExportButton();
+        URL.revokeObjectURL(workerUrl);
+      };
+
+      worker.onmessage = async (e) => {
+        if (e.data.type === 'progress') {
+          const pct = Math.round(e.data.value * 100);
+          const bar = document.getElementById('exportProgressBar');
+          const label = document.getElementById('exportProgressLabel');
+          if (bar) bar.style.width = pct + '%';
+          if (label) label.textContent = pct + '%';
+        }
+        if (e.data.type === 'done') {
+          const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+          const sizeStr = formatBytes(e.data.buffer.byteLength);
+          downloadMP4(e.data.buffer, state.config.filename || 'sequentia');
+          showToast(`${state.config.filename || 'sequentia'}.mp4 · ${sizeStr} · ${elapsed}s`, 'success');
+          resetExportButton();
+          URL.revokeObjectURL(workerUrl);
+          playCompletionSound();
+        }
+        if (e.data.type === 'cancelled') {
+          showToast('Exportación cancelada', 'info');
+          resetExportButton();
+          URL.revokeObjectURL(workerUrl);
+        }
+        if (e.data.type === 'error') {
+          showToast('Error en exportación: ' + e.data.msg, 'error');
+          resetExportButton();
+          URL.revokeObjectURL(workerUrl);
+        }
+      };
+
+      worker.postMessage({ type: 'start', payload }, transferables);
+    }
+
     // ── Init ─────────────────────────────────────────────────────────
 
     async function main() {
@@ -2770,6 +3006,9 @@
           }
         });
       });
+
+      // Task 12: Export button
+      document.getElementById('btnExport').onclick = () => startExport();
 
       // Task 5: Controles de reproducción
       document.getElementById('btnPlayPause').addEventListener('click', () => {
@@ -2940,6 +3179,440 @@
     }
 
     main();
+  </script>
+
+  <!-- Worker source stored as text/plain so < operators are not parsed as HTML tags -->
+  <script type="text/plain" id="worker-src">
+import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/mediabunny@latest/dist/index.js';
+
+let cancelled = false;
+self.onmessage = async (e) => {
+  if (e.data.type === 'cancel') { cancelled = true; return; }
+  if (e.data.type === 'start') await runExport(e.data.payload);
+};
+
+async function runExport(payload) {
+  cancelled = false;
+  const { slides, config, audioData } = payload;
+  const { w, h, fps, bitrate, transitionDuration } = config;
+
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target,
+    video: { codec: 'avc', width: w, height: h },
+    audio: audioData ? { codec: 'aac', numberOfChannels: 2, sampleRate: audioData.sampleRate } : undefined,
+    fastStart: 'in-memory',
+  });
+
+  const videoEncoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: e => self.postMessage({ type: 'error', msg: e.message }),
+  });
+  await videoEncoder.configure({ codec: 'avc1.4d001f', width: w, height: h, bitrate, framerate: fps });
+
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+
+  const totalDuration = slides.reduce((sum, s) => sum + s.duration, 0)
+                      + Math.max(0, slides.length - 1) * transitionDuration;
+  const totalFrames = Math.round(totalDuration * fps);
+  let frameIndex = 0;
+  let timestamp = 0; // microseconds
+  const frameDurationUs = Math.round(1_000_000 / fps);
+
+  for (let si = 0; si < slides.length; si++) {
+    if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+    const slide = slides[si];
+    const slideFrames = Math.round(slide.duration * fps);
+    const transFrames = si < slides.length - 1 ? Math.round(transitionDuration * fps) : 0;
+    const nextSlide = si < slides.length - 1 ? slides[si + 1] : null;
+
+    for (let f = 0; f < slideFrames; f++) {
+      if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+      const t = slideFrames > 1 ? f / (slideFrames - 1) : 0;
+      renderSlideWorker(ctx, slide, null, t, w, h, 'none', config);
+      await encodeFrame(videoEncoder, canvas, timestamp, frameDurationUs);
+      timestamp += frameDurationUs;
+      frameIndex++;
+      if (frameIndex % 15 === 0) self.postMessage({ type: 'progress', value: frameIndex / totalFrames });
+    }
+
+    if (transFrames > 0 && nextSlide) {
+      for (let f = 0; f < transFrames; f++) {
+        if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+        const t = transFrames > 1 ? f / (transFrames - 1) : 0;
+        renderSlideWorker(ctx, slide, nextSlide, t, w, h, slide.transition || 'fade', config);
+        await encodeFrame(videoEncoder, canvas, timestamp, frameDurationUs);
+        timestamp += frameDurationUs;
+        frameIndex++;
+        if (frameIndex % 15 === 0) self.postMessage({ type: 'progress', value: frameIndex / totalFrames });
+      }
+    }
+  }
+
+  await videoEncoder.flush();
+  videoEncoder.close();
+
+  if (audioData) {
+    await encodeAudio(muxer, audioData, Math.round(totalDuration * audioData.sampleRate));
+  }
+
+  muxer.finalize();
+  self.postMessage({ type: 'done', buffer: target.buffer }, [target.buffer]);
+}
+
+async function encodeFrame(encoder, canvas, timestamp, duration) {
+  const frame = new VideoFrame(canvas, { timestamp, duration });
+  const keyFrame = (timestamp === 0);
+  encoder.encode(frame, { keyFrame });
+  frame.close();
+  if (Math.round(timestamp / duration) % 30 === 0) {
+    await encoder.flush();
+  }
+}
+
+async function encodeAudio(muxer, audioData, totalSamples) {
+  const { left, right, sampleRate } = audioData;
+  const audioEncoder = new AudioEncoder({
+    output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+    error: e => self.postMessage({ type: 'error', msg: 'Audio: ' + e.message }),
+  });
+  audioEncoder.configure({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate, bitrate: 128_000 });
+
+  const CHUNK_SIZE = 1024;
+  let offset = 0;
+  let audioTimestamp = 0;
+  const audioFrameDurationUs = Math.round(CHUNK_SIZE / sampleRate * 1_000_000);
+
+  while (offset < totalSamples) {
+    const end = Math.min(offset + CHUNK_SIZE, totalSamples);
+    const size = end - offset;
+    const audioFrame = new AudioData({
+      format: 'f32-planar',
+      sampleRate,
+      numberOfFrames: size,
+      numberOfChannels: 2,
+      timestamp: audioTimestamp,
+      data: new Float32Array([
+        ...left.slice(offset, end),
+        ...right.slice(offset, end),
+      ]),
+    });
+    audioEncoder.encode(audioFrame);
+    audioFrame.close();
+    audioTimestamp += audioFrameDurationUs;
+    offset += CHUNK_SIZE;
+  }
+  await audioEncoder.flush();
+  audioEncoder.close();
+}
+
+// ── Worker render helpers ────────────────────────────────────────────
+
+function calcFit(imgW, imgH, canvasW, canvasH, mode) {
+  const imgRatio = imgW / imgH;
+  const canRatio = canvasW / canvasH;
+  let dw, dh;
+  if (mode === 'cover') {
+    dw = imgRatio > canRatio ? canvasH * imgRatio : canvasW;
+    dh = dw / imgRatio;
+  } else if (mode === 'fit-width') {
+    dw = canvasW;
+    dh = dw / imgRatio;
+  } else if (mode === 'fit-height') {
+    dh = canvasH;
+    dw = dh * imgRatio;
+  } else { // contain (default)
+    if (imgRatio > canRatio) { dw = canvasW; dh = dw / imgRatio; }
+    else { dh = canvasH; dw = dh * imgRatio; }
+  }
+  return { dx: (canvasW - dw) / 2, dy: (canvasH - dh) / 2, dw, dh };
+}
+
+function drawSlideWorker(ctx, slide, t, w, h, config) {
+  ctx.clearRect(0, 0, w, h);
+
+  // 1. Background color
+  ctx.fillStyle = config.bgColor || '#000000';
+  ctx.fillRect(0, 0, w, h);
+
+  // 2. Background blur layer using slide.bitmap
+  if (slide.bitmap) {
+    if (config.bgBlur > 0) {
+      ctx.save();
+      ctx.filter = `blur(${config.bgBlur * 0.3}px)`;
+      const padding = 1.1;
+      const bw = w * padding, bh = h * padding;
+      const bx = (w - bw) / 2, by = (h - bh) / 2;
+      const fit = calcFit(slide.bitmap.width, slide.bitmap.height, bw, bh, 'cover');
+      ctx.drawImage(slide.bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+      ctx.filter = 'none';
+      ctx.restore();
+    } else {
+      const fit = calcFit(slide.bitmap.width, slide.bitmap.height, w, h, 'cover');
+      ctx.drawImage(slide.bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+    }
+  }
+
+  // 3. Main image (fitMode)
+  if (slide.bitmap) {
+    const fit = calcFit(slide.bitmap.width, slide.bitmap.height, w, h, config.fitMode || 'contain');
+    ctx.drawImage(slide.bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+  }
+
+  // 4. Global overlays
+  drawGlobalOverlaysWorker(ctx, w, h, config);
+
+  // 5. Text overlay
+  if (slide.textObj) {
+    drawTextOverlayWorker(ctx, slide.textObj, t, w, h, slide.duration);
+  }
+}
+
+function drawGlobalOverlaysWorker(ctx, w, h, config) {
+  // Frame
+  if (config.frameBitmap) {
+    ctx.globalAlpha = config.frameOpacity ?? 1;
+    ctx.drawImage(config.frameBitmap, 0, 0, w, h);
+    ctx.globalAlpha = 1;
+  }
+  // Watermark
+  if (config.watermarkBitmap) {
+    const ww = w * (config.watermarkScale ?? 0.2);
+    const wh = ww * (config.watermarkBitmap.height / config.watermarkBitmap.width);
+    ctx.globalAlpha = config.watermarkOpacity ?? 1;
+    ctx.drawImage(
+      config.watermarkBitmap,
+      (config.watermarkX ?? 0.5) * w - ww / 2,
+      (config.watermarkY ?? 0.5) * h - wh / 2,
+      ww, wh
+    );
+    ctx.globalAlpha = 1;
+  }
+  // Vignette
+  if (config.vignette > 0) {
+    const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+    grad.addColorStop(0, (config.vignetteColor || '#000000') + '00');
+    grad.addColorStop(1, (config.vignetteColor || '#000000') + Math.round(config.vignette * 255).toString(16).padStart(2, '0'));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+function drawTextOverlayWorker(ctx, textObj, t, w, h, slideDuration) {
+  if (!textObj) return;
+  const { title, subtitle, font, size, color, opacity, position, bgStyle, bgOpacity, animation, visibleDuration } = textObj;
+  if (!title && !subtitle) return;
+
+  const dur = visibleDuration ?? slideDuration;
+  if (t * slideDuration > dur) return;
+
+  const scaledSize = size * w / 1920;
+  const subSize = scaledSize * 0.6;
+  const lineGap = scaledSize * 0.15;
+
+  let alpha = opacity;
+  let offsetY = 0;
+  const FADE_IN = 0.3;
+  const elapsed = t * slideDuration;
+
+  if (animation === 'fade' || animation === 'slideup') {
+    if (elapsed < FADE_IN) {
+      alpha = opacity * (elapsed / FADE_IN);
+    }
+    if (animation === 'slideup' && elapsed < FADE_IN) {
+      const progress = elapsed / FADE_IN;
+      offsetY = (1 - progress) * scaledSize * 1.2;
+    }
+  }
+
+  ctx.save();
+  ctx.font = `600 ${scaledSize}px ${font}, sans-serif`;
+  const titleW = title ? ctx.measureText(title).width : 0;
+  ctx.font = `400 ${subSize}px ${font}, sans-serif`;
+  const subW = subtitle ? ctx.measureText(subtitle).width : 0;
+
+  const blockW = Math.max(titleW, subW);
+  const blockH = (title ? scaledSize : 0) + (subtitle ? subSize + lineGap : 0);
+
+  const cx = position.x * w;
+  const cy = position.y * h + offsetY;
+
+  if (bgStyle !== 'none') {
+    const padX = scaledSize * 0.5;
+    const padY = scaledSize * 0.25;
+    const bgX = cx - blockW / 2 - padX;
+    const bgY = cy - scaledSize - padY;
+    const bgW = blockW + padX * 2;
+    const bgH = blockH + padY * 2;
+
+    ctx.globalAlpha = bgOpacity;
+    ctx.fillStyle = '#000000';
+
+    if (bgStyle === 'pill') {
+      const r = (bgH / 2);
+      ctx.beginPath();
+      ctx.roundRect(bgX, bgY, bgW, bgH, r);
+      ctx.fill();
+    } else if (bgStyle === 'bar') {
+      ctx.fillRect(0, bgY, w, bgH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  if (title) {
+    ctx.globalAlpha = alpha;
+    ctx.font = `600 ${scaledSize}px ${font}, sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(title, cx, cy);
+  }
+
+  if (subtitle) {
+    ctx.globalAlpha = alpha;
+    ctx.font = `400 ${subSize}px ${font}, sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const subY = cy + (title ? lineGap + subSize : 0);
+    ctx.fillText(subtitle, cx, subY);
+  }
+
+  ctx.restore();
+}
+
+// ── Transition functions (worker versions) ───────────────────────────
+
+function transitionFadeW(ctx, slideA, slideB, t, w, h, config) {
+  drawSlideWorker(ctx, slideA, 0, w, h, config);
+  const tmp = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmp.getContext('2d'), slideB, 0, w, h, config);
+  ctx.globalAlpha = t;
+  ctx.drawImage(tmp, 0, 0);
+  ctx.globalAlpha = 1;
+}
+
+function transitionSlideW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
+  const dirs = {
+    left:  [0, 0, -w * t, 0, w * (1 - t), 0],
+    right: [0, 0,  w * t, 0, -w * (1 - t), 0],
+    up:    [0, 0, 0, -h * t, 0, h * (1 - t)],
+    down:  [0, 0, 0,  h * t, 0, -h * (1 - t)],
+  };
+  const [,, ax, ay, bx, by] = dirs[dir] || dirs.left;
+
+  const tmpA = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  const tmpB = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.save(); ctx.translate(ax, ay); ctx.drawImage(tmpA, 0, 0); ctx.restore();
+  ctx.save(); ctx.translate(bx, by); ctx.drawImage(tmpB, 0, 0); ctx.restore();
+}
+
+function transitionZoomPunchW(ctx, slideA, slideB, t, w, h, config) {
+  const tmpA = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  const tmpB = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
+
+  const scaleA = 1 + t * 0.15;
+  ctx.save();
+  ctx.translate(w / 2, h / 2); ctx.scale(scaleA, scaleA); ctx.translate(-w / 2, -h / 2);
+  ctx.globalAlpha = 1 - t;
+  ctx.drawImage(tmpA, 0, 0);
+  ctx.restore();
+
+  const scaleB = 1.15 - t * 0.15;
+  ctx.save();
+  ctx.translate(w / 2, h / 2); ctx.scale(scaleB, scaleB); ctx.translate(-w / 2, -h / 2);
+  ctx.globalAlpha = t;
+  ctx.drawImage(tmpB, 0, 0);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function transitionWipeW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
+  const tmpA = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  const tmpB = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
+
+  ctx.drawImage(tmpA, 0, 0);
+  ctx.save();
+  ctx.beginPath();
+  if (dir === 'left')  ctx.rect(0,       0, w * t,       h);
+  if (dir === 'right') ctx.rect(w*(1-t), 0, w * t,       h);
+  if (dir === 'up')    ctx.rect(0,       0, w,       h * t);
+  if (dir === 'down')  ctx.rect(0, h*(1-t), w,       h * t);
+  ctx.clip();
+  ctx.drawImage(tmpB, 0, 0);
+  ctx.restore();
+}
+
+function transitionCrossZoomW(ctx, slideA, slideB, t, w, h, config) {
+  const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+  const tmpA = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  const tmpB = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
+
+  const speed = config.crossZoomSpeed ?? 0.5;
+  const scaleA = 1 + ease * speed * 2;
+  ctx.save();
+  ctx.translate(w/2, h/2); ctx.scale(scaleA, scaleA); ctx.translate(-w/2, -h/2);
+  ctx.globalAlpha = 1 - ease;
+  ctx.drawImage(tmpA, 0, 0);
+  ctx.restore();
+
+  const scaleB = 1 + (1 - ease) * speed * 2;
+  ctx.save();
+  ctx.translate(w/2, h/2); ctx.scale(scaleB, scaleB); ctx.translate(-w/2, -h/2);
+  ctx.globalAlpha = ease;
+  ctx.drawImage(tmpB, 0, 0);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function transitionFlashW(ctx, slideA, slideB, t, w, h, config) {
+  const flashT = t < 0.5 ? t * 2 : (1 - t) * 2;
+  const tmp = new OffscreenCanvas(w, h);
+  drawSlideWorker(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, 0, w, h, config);
+  ctx.drawImage(tmp, 0, 0);
+  ctx.fillStyle = config.flashColor ?? '#ffffff';
+  ctx.globalAlpha = flashT;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalAlpha = 1;
+}
+
+let _workerRandomTransition = 'fade';
+const TRANSITIONS_LIST_W = ['fade', 'slide', 'zoom-punch', 'wipe', 'cross-zoom', 'flash'];
+
+function renderSlideWorker(ctx, slideA, slideB, t, w, h, transition, config) {
+  if (!slideB || transition === 'none') {
+    drawSlideWorker(ctx, slideA, t, w, h, config);
+    return;
+  }
+
+  let tr = transition;
+  if (tr === 'random') {
+    if (t < 0.01) _workerRandomTransition = TRANSITIONS_LIST_W[Math.floor(Math.random() * TRANSITIONS_LIST_W.length)];
+    tr = _workerRandomTransition;
+  }
+
+  const [type, dir] = tr.split('-');
+  switch (type) {
+    case 'fade':   transitionFadeW(ctx, slideA, slideB, t, w, h, config); break;
+    case 'slide':  transitionSlideW(ctx, slideA, slideB, t, w, h, config, dir || 'left'); break;
+    case 'zoom':   transitionZoomPunchW(ctx, slideA, slideB, t, w, h, config); break;
+    case 'wipe':   transitionWipeW(ctx, slideA, slideB, t, w, h, config, dir || 'left'); break;
+    case 'cross':  transitionCrossZoomW(ctx, slideA, slideB, t, w, h, config); break;
+    case 'flash':  transitionFlashW(ctx, slideA, slideB, t, w, h, config); break;
+    default:       transitionFadeW(ctx, slideA, slideB, t, w, h, config); break;
+  }
+}
   </script>
 
 </body>
