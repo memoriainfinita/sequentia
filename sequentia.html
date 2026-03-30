@@ -2950,7 +2950,9 @@
       _webCodecsSupported = supported;
       dot.style.background = supported ? 'var(--green)' : 'var(--red)';
       label.textContent = supported ? 'Listo para exportar' : 'Requiere Chrome o Edge';
-      document.getElementById('btnExport').disabled = !supported || state.slides.length === 0;
+      const btn = document.getElementById('btnExport');
+      btn.disabled = !supported || state.slides.length === 0;
+      btn.title = supported ? '' : 'La exportación requiere Chrome o Edge';
     }
 
     // ── Task 8: Slide Override Panel ─────────────────────────────────

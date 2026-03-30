@@ -60,6 +60,35 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-30 — Sesión 11: Implementación Task 16
+**Hecho:**
+- Task 16 (Polish + Edge Cases) completada
+- Casi todo estaba implementado en sesiones anteriores; los cambios de esta sesión:
+  - `cycleTransition()` corregida: ahora actualiza pills de `#pillTransition`, llama `updateTransitionOpts()`, `pushUndo()` y `debouncedSave()`
+  - Dev button comentado añadido en `header-right`: `<!-- DEV: ... <button id="btnDevExport"> -->`
+  - `checkWebCodecsSupport()`: añadido `btn.title` con mensaje de tooltip cuando WebCodecs no está disponible
+- `sequentia.html` ahora ~4035 líneas
+- Implementación completa — todas las Tasks 1-16 terminadas
+
+**Estado de la app (verificado por spec review):**
+- Indicador Live/Recording ✅
+- Badge baja resolución ✅
+- Orden de carga (localeCompare) ✅
+- EXIF orientation ✅
+- Estado vacío (canvas + controls deshabilitados) ✅
+- Confirmación delete con overrides ✅
+- Toasts (success/error/info) ✅
+- Estimación peso exportación ✅
+- checkWebCodecsSupport + tooltip ✅
+- Guard atajos en inputs ✅
+- Presets validados con × delete ✅
+- Tecla T global ✅
+- Botón Dev comentado ✅
+
+**Próximo paso:** Prueba manual desde `file://` con Chrome según checklist de Task 16. App lista para uso.
+
+---
+
 ### 2026-03-29 — Sesión 10: Implementación Task 15
 **Hecho:**
 - Task 15 (Fullscreen Presentation Mode) completada — `#fullscreenOverlay` en `#previewWrap`, CSS con auto-hide (opacity/pointer-events), `_enterFullscreenUI`/`_exitFullscreenUI`, `_showFsOverlay`/`_hideFsOverlay` con timer 3s, `_onFsMouseMove` attached/detached en enter/exit, `fullscreenchange` para Escape, botones fsoPrev/fsoPlay/fsoNext/fsoExit, `updatePlayControls()` sincroniza fsoPlay/fsoCounter/fsoProgressBar
@@ -197,9 +226,9 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - [x] Task 13: Persistence (Autosave + JSON)
   - [x] Task 14: Undo / Redo Stack
   - [x] Task 15: Fullscreen Presentation Mode
-  - [ ] Task 16: Polish + Edge Cases
+  - [x] Task 16: Polish + Edge Cases
 - [ ] Definir bitrates exactos para presets Bajo/Medio/Alto al llegar al motor de exportación
-- [ ] Botón Dev (exportar todas las combinaciones) — comentado hasta que haga falta
+- [x] Botón Dev (exportar todas las combinaciones) — comentado en el HTML
 
 ## Decisiones de arquitectura (post-auditoría 2026-03-28)
 
