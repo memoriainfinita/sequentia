@@ -60,6 +60,29 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-30 — Sesión 12: Audit completo + fixes
+**Hecho:**
+- Audit paralelo de todas las Tasks 1-16 con 7 agentes — 10 issues encontrados
+- Tasks 6-7-8-9-10-11-12-15: sin issues
+- 10 fixes aplicados y verificados:
+
+| Fix | Issue |
+|-----|-------|
+| A1 | `updateCanvasSize()` ahora setea `canvas.style.width/height` en path normal |
+| A2 | `drawSlide()` usa `cfg._bgBitmap` cuando `bgImageId` está set; listener crea bitmap; export lo transfiere |
+| A3 | Reemplazar imagen: `slide._bitmap` se actualiza correctamente, `blobUrl` se revoca y renueva |
+| A4 | `removeSlide()` difiere borrado de IndexedDB con `_pendingBlobDeletes` Set; `pushUndo()` purga cuando ya no recuperable |
+| M1 | `TRANSITIONS_LIST` incluye `'random'` — tecla T ahora cicla hasta Random |
+| M2 | Delete/Backspace elimina slide seleccionado (con confirm si tiene overrides) |
+| M3 | `removeSlide()` llama `updateExportEstimate()` |
+| M4 | Badge baja resolución usa `getCanvasDimensions()` — correcto para todos los aspect ratios |
+| B1 | `DB_NAME`/`DB_VERSION` como constantes nombradas |
+| B2 | `fileInput` movido dentro de `.panel-footer` en `#panelRight` |
+
+**Próximo paso:** prueba manual desde `file://` con Chrome — app lista.
+
+---
+
 ### 2026-03-30 — Sesión 11: Implementación Task 16
 **Hecho:**
 - Task 16 (Polish + Edge Cases) completada
