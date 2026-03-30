@@ -620,13 +620,12 @@
       </div>
       <div class="panel-footer">
         <button id="btnAddImages">+ Añadir imágenes</button>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png" multiple hidden>
       </div>
     </div>
   </div>
 
   <div id="toastContainer"></div>
-
-  <input type="file" id="fileInput" accept="image/jpeg,image/png" multiple hidden>
 
   <script type="module">
     // Tasks 2+ aquí
@@ -660,11 +659,29 @@
     // ── Task 14: Undo / Redo Stack ───────────────────────────────────
     const undoStack = []; // máx 50 entradas
     const redoStack = [];
+    const _pendingBlobDeletes = new Set(); // IDs pendientes de borrar de IndexedDB
 
     function pushUndo() {
       undoStack.push(JSON.stringify(serializeState(state)));
       if (undoStack.length > 50) undoStack.shift();
       redoStack.length = 0; // limpiar redo al hacer nueva acción
+
+      // Borrar blobs que ya no son recuperables desde ninguna entrada de undo/redo
+      if (_pendingBlobDeletes.size > 0) {
+        const allSnapshotIds = new Set();
+        for (const entry of undoStack) {
+          try { JSON.parse(entry).slides?.forEach(s => allSnapshotIds.add(s.id)); } catch {}
+        }
+        for (const entry of redoStack) {
+          try { JSON.parse(entry).slides?.forEach(s => allSnapshotIds.add(s.id)); } catch {}
+        }
+        for (const id of _pendingBlobDeletes) {
+          if (!allSnapshotIds.has(id)) {
+            dbDelete('images', id);
+            _pendingBlobDeletes.delete(id);
+          }
+        }
+      }
     }
 
     async function undo() {
@@ -709,6 +726,8 @@
 
       // Recover blobs for slides that were deleted (still in IndexedDB)
       for (const slide of state.slides) {
+        // Si el slide está siendo recuperado, cancelar su borrado diferido
+        _pendingBlobDeletes.delete(slide.id);
         if (slide._missing) {
           const rec = await dbGet('images', slide.id);
           if (rec?.blob) {
@@ -735,9 +754,12 @@
 
     // ── Task 2: IndexedDB Storage Layer ─────────────────────────────
 
+    const DB_NAME = 'sequentia-db';
+    const DB_VERSION = 1;
+
     async function openDB() {
       return new Promise((resolve, reject) => {
-        const req = indexedDB.open('sequentia-db', 1);
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = e => {
           const db = e.target.result;
           if (!db.objectStoreNames.contains('project')) db.createObjectStore('project', { keyPath: 'id' });
@@ -983,12 +1005,13 @@
       const slide = state.slides[idx];
       URL.revokeObjectURL(slide.blobUrl);
       if (slide._bitmap) { slide._bitmap.close(); delete slide._bitmap; }
-      dbDelete('images', id);
+      _pendingBlobDeletes.add(id); // borrar de IndexedDB diferido hasta que no sea recuperable
       state.slides.splice(idx, 1);
       if (state.currentIndex >= state.slides.length) {
         state.currentIndex = Math.max(0, state.slides.length - 1);
       }
       renderThumbs();
+      updateExportEstimate();
       pushUndo(); debouncedSave();
     }
 
@@ -1015,7 +1038,7 @@
 
       empty.remove();
 
-      const res = getCanvasRes();
+      const res = getCanvasDimensions();
 
       list.innerHTML = '';
       state.slides.forEach((slide, i) => {
@@ -1183,14 +1206,16 @@
           }
           const blob = file;
           const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+          if (slide._bitmap) { slide._bitmap.close(); }
+          slide._bitmap = bitmap;
           URL.revokeObjectURL(slide.blobUrl);
           slide.blobUrl = URL.createObjectURL(blob);
           slide.name = file.name;
           slide.width = bitmap.width;
           slide.height = bitmap.height;
-          bitmap.close();
           await dbPut('images', { id: slide.id, blob, name: file.name, width: slide.width, height: slide.height });
           renderThumbs();
+          renderFrame();
           pushUndo(); debouncedSave();
         });
         input.click();
@@ -1250,6 +1275,8 @@
       const displayW = Math.round(w * scale);
       const displayH = Math.round(h * scale);
 
+      canvas.style.width  = displayW + 'px';
+      canvas.style.height = displayH + 'px';
       wrap.style.width = displayW + 'px';
       wrap.style.height = displayH + 'px';
 
@@ -1304,6 +1331,25 @@
       // 1. Fondo base (color)
       ctx.fillStyle = cfg.bgColor || '#000000';
       ctx.fillRect(0, 0, w, h);
+
+      // 1b. Fondo con imagen personalizada (bgImageId / _bgBitmap)
+      if (cfg.bgImageId && cfg._bgBitmap) {
+        const blur = cfg.bgImageBlur ?? 0;
+        if (blur > 0) {
+          ctx.save();
+          ctx.filter = `blur(${blur * 0.3}px)`;
+          const padding = 1.1;
+          const bw = w * padding, bh = h * padding;
+          const bx = (w - bw) / 2, by = (h - bh) / 2;
+          const fit = calcFit(cfg._bgBitmap.width, cfg._bgBitmap.height, bw, bh, 'cover');
+          ctx.drawImage(cfg._bgBitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+          ctx.filter = 'none';
+          ctx.restore();
+        } else {
+          const fit = calcFit(cfg._bgBitmap.width, cfg._bgBitmap.height, w, h, 'cover');
+          ctx.drawImage(cfg._bgBitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+        }
+      }
 
       // 2. Fondo con imagen del slide (blur)
       if (slide._bitmap) {
@@ -1396,7 +1442,7 @@
     let _slideElapsed = 0;   // segundos transcurridos en el slide actual
     let _transElapsed = 0;   // segundos en la transición
     let _inTransition = false;
-    const TRANSITIONS_LIST = ['fade', 'slide', 'zoom-punch', 'wipe', 'cross-zoom', 'flash'];
+    const TRANSITIONS_LIST = ['fade', 'slide', 'zoom-punch', 'wipe', 'cross-zoom', 'flash', 'random'];
 
     function getEffectiveDuration(slide) {
       return slide?.overrides?.duration ?? state.config.slideDuration;
@@ -2414,8 +2460,10 @@
         const blob = file;
         const id = 'bg-' + crypto.randomUUID();
         await dbPut('images', { id, blob, name: file.name });
+        if (state.config._bgBitmap) { state.config._bgBitmap.close(); state.config._bgBitmap = null; }
         state.config.bgImageId = id;
         state.config.bgImageBlur = 0;
+        state.config._bgBitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
         const url = URL.createObjectURL(blob);
         const img = document.getElementById('bgImagePreview');
         img.src = url;
@@ -3222,6 +3270,8 @@
         watermarkY: cfg.watermark?.y ?? 0.5,
         frameBitmap: cfg.frame?.img ? await createImageBitmap(cfg.frame.img) : null,
         frameOpacity: cfg.frame?.opacity ?? 1,
+        bgBitmap: (cfg.bgImageId && cfg._bgBitmap) ? await createImageBitmap(cfg._bgBitmap) : null,
+        bgImageBlur: cfg.bgImageBlur ?? 0,
       };
 
       let audioData = null;
@@ -3234,6 +3284,7 @@
       const transferables = slides.map(s => s.bitmap).filter(Boolean);
       if (workerConfig.watermarkBitmap) transferables.push(workerConfig.watermarkBitmap);
       if (workerConfig.frameBitmap) transferables.push(workerConfig.frameBitmap);
+      if (workerConfig.bgBitmap) transferables.push(workerConfig.bgBitmap);
       if (audioData) {
         transferables.push(audioData.left.buffer, audioData.right.buffer);
       }
@@ -3454,6 +3505,19 @@
         if (e.ctrlKey && e.shiftKey && e.key === 'z')  { e.preventDefault(); redo(); return; }
         if (e.ctrlKey && e.key === 'y')                 { e.preventDefault(); redo(); return; }
 
+        const deleteCurrentSlide = () => {
+          if (state.slides.length === 0) return;
+          const slide = state.slides[state.currentIndex];
+          const ov = slide.overrides || {};
+          const items = [
+            ov.duration    && `duración (${ov.duration}s)`,
+            ov.transition  && `transición (${ov.transition})`,
+            ov.textMode === 'own' && 'texto propio',
+          ].filter(Boolean);
+          if (items.length === 0 || confirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
+            removeSlide(slide.id);
+          }
+        };
         const map = {
           ArrowLeft:  () => goToSlide(state.currentIndex - 1),
           ArrowRight: () => goToSlide(state.currentIndex + 1),
@@ -3467,6 +3531,8 @@
           'M':        () => { const a = document.getElementById('audioEl'); if (a) { a.muted = !a.muted; if (state.config.audio) { state.config.audio.muted = a.muted; pushUndo(); debouncedSave(); } } },
           't':        () => cycleTransition(),
           'T':        () => cycleTransition(),
+          'Delete':    () => deleteCurrentSlide(),
+          'Backspace': () => deleteCurrentSlide(),
         };
         if (map[e.key]) { e.preventDefault(); map[e.key](); }
       });
@@ -3755,6 +3821,25 @@ function drawSlideWorker(ctx, slide, t, w, h, config) {
   // 1. Background color
   ctx.fillStyle = config.bgColor || '#000000';
   ctx.fillRect(0, 0, w, h);
+
+  // 1b. Background image (bgBitmap)
+  if (config.bgBitmap) {
+    const blur = config.bgImageBlur ?? 0;
+    if (blur > 0) {
+      ctx.save();
+      ctx.filter = `blur(${blur * 0.3}px)`;
+      const padding = 1.1;
+      const bw = w * padding, bh = h * padding;
+      const bx = (w - bw) / 2, by = (h - bh) / 2;
+      const fit = calcFit(config.bgBitmap.width, config.bgBitmap.height, bw, bh, 'cover');
+      ctx.drawImage(config.bgBitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+      ctx.filter = 'none';
+      ctx.restore();
+    } else {
+      const fit = calcFit(config.bgBitmap.width, config.bgBitmap.height, w, h, 'cover');
+      ctx.drawImage(config.bgBitmap, fit.dx, fit.dy, fit.dw, fit.dh);
+    }
+  }
 
   // 2. Background blur layer using slide.bitmap
   if (slide.bitmap) {
