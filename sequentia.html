@@ -565,6 +565,9 @@
       <label class="toggle"><input type="checkbox" id="chkLoop"> Loop</label>
       <button id="btnExportJSON" class="btn-ghost">Export JSON</button>
       <button id="btnImportJSON" class="btn-ghost">Import JSON</button>
+      <!-- DEV: descomentar para activar exportación de todas las combinaciones
+      <button id="btnDevExport" style="display:none">Dev Export All</button>
+      -->
     </div>
   </header>
 
@@ -1566,6 +1569,9 @@
       const cur = state.config.transition;
       const idx = TRANSITIONS_LIST.indexOf(cur);
       state.config.transition = TRANSITIONS_LIST[(idx + 1) % TRANSITIONS_LIST.length];
+      document.querySelectorAll('#pillTransition .pill').forEach(b => b.classList.toggle('active', b.dataset.trans === state.config.transition));
+      updateTransitionOpts();
+      pushUndo(); debouncedSave();
       showToast('Transición: ' + state.config.transition, 'info');
     }
 
