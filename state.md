@@ -1,6 +1,6 @@
 ---
 created: 2026-03-28
-last_updated: 2026-03-28
+last_updated: 2026-03-31
 version: 1.0
 ---
 
@@ -12,14 +12,14 @@ version: 1.0
 - **Tipo:** App web de escritorio, archivo HTML único
 - **Ruta:** `SEQUENTIA/`
 - **Stack:** HTML + CSS + JS vanilla, sin frameworks, sin build tools
-- **Motor de exportación:** WebCodecs API + mp4-muxer
+- **Motor de exportación:** WebCodecs API + Mediabunny
 - **Browser requerido para exportar:** Chrome / Edge
 - **Serverless:** sí — abre desde `file://` sin servidor
 
 ## Spec
 
 - **Activa:** `docs/specs/2026-03-28-sequentia-design.md`
-- **Estado:** aprobada, lista para plan de implementación
+- **Estado:** implementación completa (Tasks 1-16 + audit + fixes)
 
 ## Archivos clave
 
