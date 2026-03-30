@@ -60,6 +60,19 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-31 — Sesión 13: Fixes de prueba manual
+
+**Hecho:**
+- Fix CORS audio `file://`: auto fade-out cuando audio > video en export (`applyAudioSettings`)
+- Fix `renderThumbs`: reemplazado `list.innerHTML = ''` por eliminación selectiva → `#emptyState` ya no se destruye del DOM → el borrado de slides funciona
+- Fix `addImages()`: añadidos `updateEmptyState()` y `updatePlayControls()` → el canvas vacío desaparece y los controles se activan al cargar imágenes
+- Fix `removeSlide()`: añadidos `renderFrame()`, `updateEmptyState()`, `updatePlayControls()`
+- Reemplazados todos los `confirm()` y `prompt()` nativos por modal `showConfirm()` personalizado (CSS coherente con design system)
+
+**Próximo paso:** bugs y ajustes listados en TODO de esta sesión. Empezar por el CORS de Mediabunny (bloquea exportación).
+
+---
+
 ### 2026-03-30 — Sesión 12: Audit completo + fixes
 **Hecho:**
 - Audit paralelo de todas las Tasks 1-16 con 7 agentes — 10 issues encontrados
@@ -233,25 +246,26 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 ## TODO
 
 - [x] Crear plan de implementación con `superpowers:writing-plans`
-- [ ] Implementar app principal — ver `docs/superpowers/plans/2026-03-28-sequentia-app.md`
-  - [x] Task 1: HTML Shell + CSS Design System
-  - [x] Task 2: IndexedDB Storage Layer
-  - [x] Task 3: Image Loading + Thumbnail Panel
-  - [x] Task 4: Canvas Preview Engine
-  - [x] Task 5: Playback Controls + Keyboard Shortcuts
-  - [x] Task 6: Transitions (7)
-  - [x] Task 7: Configuration Panels
-  - [x] Task 8: Slide Override Panel
-  - [x] Task 9: Text Overlays
-  - [x] Task 10: Global Overlays (Watermark, Frame, Vignette)
-  - [x] Task 11: Audio System
-  - [x] Task 12: Export Engine (WebCodecs + Mediabunny)
-  - [x] Task 13: Persistence (Autosave + JSON)
-  - [x] Task 14: Undo / Redo Stack
-  - [x] Task 15: Fullscreen Presentation Mode
-  - [x] Task 16: Polish + Edge Cases
-- [ ] Definir bitrates exactos para presets Bajo/Medio/Alto al llegar al motor de exportación
+- [x] Implementar app principal — Tasks 1-16 completas
 - [x] Botón Dev (exportar todas las combinaciones) — comentado en el HTML
+
+### Bugs y ajustes pendientes (detectados en prueba manual 2026-03-31)
+
+**Crítico (bloquea uso)**
+- [ ] **CORS Mediabunny en file://** — El worker usa `importScripts('https://cdn...')` que falla desde `file://` con CORS/MIME error. Solución: fetch mediabunny en main thread → pasar código como string al worker, o bundlear inline en el HTML. Sin esto la exportación no funciona.
+
+**Bugs funcionales**
+- [ ] **Blur: salto al pasar de 0 a 1** — En `drawSlide()`, cuando `bgBlur` pasa de 0 a cualquier valor > 0, la lógica de renderizado cambia bruscamente (cover sin blur vs blur con padding 10%). La imagen da un salto visible. Unificar el path de renderizado para que sea continuo.
+- [ ] **Fondo personalizado no se aplica** — Cuando hay imagen de fondo personalizada (`bgImageId` set) o color sólido, se sigue mostrando la imagen del slide repetida como fondo. Bug en `drawSlide()` — revisar la lógica de selección: si `bgImageId` → usar imagen personalizada; si no → blur del slide; `bgColor` siempre como capa base.
+- [ ] **Transición Wipe = Slide Down** — `transitionWipe()` en alguna dirección produce el mismo resultado visual que Slide. Revisar `transitionWipe` vs `transitionSlide` — probablemente error en el cálculo de offset/clip.
+- [ ] **Seek de audio no se mueve durante reproducción** — El slider `#audioSeek` no tiene listener `timeupdate` → no refleja la posición actual. Añadir: `audioEl.addEventListener('timeupdate', () => { seekSlider.value = audioEl.currentTime; })`. También debe respetar trimIn/trimOut como rango del slider.
+- [ ] **Preset guardar lanza prompt() nativo** — `prompt('Nombre del preset:')` → reemplazar con modal personalizado (igual que `confirm()` → `showConfirm()`). Añadir `showPrompt(msg)` que devuelve Promise<string|null>.
+- [ ] **Fullscreen: info de resolución no se oculta** — El badge "16:9 • 720p" en la esquina inferior izquierda del canvas sigue visible en pantalla completa aunque el resto del overlay se auto-oculte. Ocultar ese elemento al entrar en fullscreen.
+
+**Ajustes de UX**
+- [ ] **Fullscreen: falta botón reiniciar (ir al principio)** — El overlay de fullscreen tiene Prev/Play-Pause/Next/Exit pero no tiene un botón de Stop/Reiniciar (equivalente a tecla R). Añadir botón que llame `goToSlide(0); pause()` o similar.
+- [ ] **Panel derecho: miniaturas no deben redimensionarse** — Cuando hay muchas imágenes, las miniaturas se encogen para caber. El panel debe tener scroll vertical con altura fija por miniatura, no ajustar tamaño. Revisar CSS de `#thumbList` y `.thumb`.
+- [ ] **Header: quitar toggle Loop** — El toggle Loop en el header es redundante; ya existe en los controles de reproducción bajo el canvas. Eliminar del header (mantener solo en playControls).
 
 ## Decisiones de arquitectura (post-auditoría 2026-03-28)
 

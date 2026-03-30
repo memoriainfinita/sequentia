@@ -254,6 +254,31 @@
       to   { opacity: 0; transform: translateX(20px); }
     }
 
+    /* ── Confirm Modal ───────────────────────────────────────────── */
+    #confirmOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px); z-index: 9998;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #confirmModal {
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 24px; max-width: 380px; width: 90%;
+    }
+    #confirmModal p { color: var(--text); font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+    #confirmModal .confirm-btns { display: flex; gap: 8px; justify-content: flex-end; }
+    #confirmModal .btn-cancel {
+      padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border);
+      background: none; color: var(--muted); cursor: pointer;
+      font-size: 13px; font-family: var(--sans);
+    }
+    #confirmModal .btn-cancel:hover { color: var(--text); }
+    #confirmModal .btn-ok {
+      padding: 8px 16px; border-radius: 6px; border: none;
+      background: var(--red); color: white; cursor: pointer;
+      font-size: 13px; font-family: var(--sans); font-weight: 500;
+    }
+    #confirmModal .btn-ok:hover { opacity: 0.9; }
+
     /* Thumbnail panel */
     #panelRight { display: flex; flex-direction: column; }
     #thumbList { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
@@ -950,6 +975,26 @@
       updateExportEstimate();
     }
 
+    // ── Confirm Modal ─────────────────────────────────────────────────
+
+    function showConfirm(msg) {
+      return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'confirmOverlay';
+        overlay.innerHTML = `
+          <div id="confirmModal">
+            <p>${msg}</p>
+            <div class="confirm-btns">
+              <button class="btn-cancel">Cancelar</button>
+              <button class="btn-ok">Confirmar</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.btn-cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
+        overlay.querySelector('.btn-ok').addEventListener('click',     () => { overlay.remove(); resolve(true);  });
+      });
+    }
+
     // ── Task 3: Toast ────────────────────────────────────────────────
 
     function showToast(msg, type = 'info') {
@@ -995,6 +1040,8 @@
       renderThumbs();
       updateCanvasSize();
       renderFrame();
+      updateEmptyState();
+      updatePlayControls();
       pushUndo(); debouncedSave();
       updateExportEstimate();
     }
@@ -1011,6 +1058,9 @@
         state.currentIndex = Math.max(0, state.slides.length - 1);
       }
       renderThumbs();
+      renderFrame();
+      updateEmptyState();
+      updatePlayControls();
       updateExportEstimate();
       pushUndo(); debouncedSave();
     }
@@ -1023,24 +1073,24 @@
 
     function renderThumbs() {
       const list = document.getElementById('thumbList');
-      const empty = document.getElementById('emptyState');
 
       const ratios = { '16:9': '16/9', '9:16': '9/16', '1:1': '1/1', '4:3': '4/3', '4:5': '4/5', '21:9': '21/9' };
       document.documentElement.style.setProperty('--canvas-ratio', ratios[state.config.aspectRatio] || '16/9');
 
+      // Remove all thumb/panel children but keep #emptyState in the DOM (show/hide via display)
+      const empty = document.getElementById('emptyState');
+      [...list.children].forEach(c => { if (c !== empty) c.remove(); });
+
       if (state.slides.length === 0) {
-        list.innerHTML = '';
-        list.appendChild(empty);
+        if (empty) empty.style.display = '';
         updateEmptyState();
         updatePlayControls();
         return;
       }
 
-      empty.remove();
+      if (empty) empty.style.display = 'none';
 
       const res = getCanvasDimensions();
-
-      list.innerHTML = '';
       state.slides.forEach((slide, i) => {
         const thumb = document.createElement('div');
         thumb.className = 'thumb' + (i === state.currentIndex ? ' selected' : '');
@@ -1128,7 +1178,7 @@
           renderThumbs();
         });
 
-        del.addEventListener('click', e => {
+        del.addEventListener('click', async e => {
           e.stopPropagation();
           const ov = slide.overrides;
           const items = [
@@ -1137,7 +1187,7 @@
             ov.textMode === 'own' && 'texto propio',
             ov.textMode === 'none' && 'texto: sin texto',
           ].filter(Boolean);
-          if (items.length === 0 || confirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
+          if (items.length === 0 || await showConfirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
             removeSlide(slide.id);
           }
         });
@@ -3104,7 +3154,7 @@
       });
 
       // Botón limpiar
-      panel.querySelector('.ov-clear').addEventListener('click', () => {
+      panel.querySelector('.ov-clear').addEventListener('click', async () => {
         const ov = slide.overrides;
         const items = [
           ov.duration && `duración (${ov.duration}s)`,
@@ -3112,7 +3162,7 @@
           ov.textMode === 'own' && 'texto propio',
           ov.textMode === 'none' && 'texto: sin texto',
         ].filter(Boolean);
-        if (items.length === 0 || confirm(`Eliminar overrides: ${items.join(', ')}?`)) {
+        if (items.length === 0 || await showConfirm(`Eliminar overrides: ${items.join(', ')}?`)) {
           slide.overrides = {};
           _openOverrideId = null;
           renderThumbs();
@@ -3198,17 +3248,19 @@
         masterGain.gain.setValueAtTime(0, 0);
         masterGain.gain.linearRampToValueAtTime(audioCfg.volume ?? 1.0, fadeInDur);
       }
-      if (audioCfg.fadeOut) {
-        const fadeOutDur = audioCfg.fadeOutDuration ?? 1.5;
+      const trimIn = audioCfg.trimIn ?? 0;
+      const trimOut = audioCfg.trimOut ?? decoded.duration;
+      const clipDuration = Math.max(0.001, trimOut - trimIn);
+
+      // Auto fade-out if audio is longer than video and user hasn't enabled fade-out manually
+      const audioLongerThanVideo = !audioCfg.loop && clipDuration > videoDuration;
+      if (audioCfg.fadeOut || audioLongerThanVideo) {
+        const fadeOutDur = audioCfg.fadeOut ? (audioCfg.fadeOutDuration ?? 1.5) : 1.5;
         const fadeStart = Math.max(0, videoDuration - fadeOutDur);
         masterGain.gain.setValueAtTime(audioCfg.volume ?? 1.0, fadeStart);
         masterGain.gain.linearRampToValueAtTime(0, videoDuration);
       }
       masterGain.connect(offlineCtx.destination);
-
-      const trimIn = audioCfg.trimIn ?? 0;
-      const trimOut = audioCfg.trimOut ?? decoded.duration;
-      const clipDuration = Math.max(0.001, trimOut - trimIn);
 
       let offset = 0;
       while (offset < videoDuration) {
@@ -3440,23 +3492,25 @@
 
       // Task 13: Import JSON
       document.getElementById('btnImportJSON').addEventListener('click', () => {
-        if (!confirm('Esto reemplazará el proyecto actual. Las imágenes deben estar disponibles en este dispositivo.')) return;
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.addEventListener('change', async e => {
-          const file = e.target.files[0];
-          if (!file) return;
-          try {
-            const text = await file.text();
-            const data = JSON.parse(text);
-            await deserializeState(data);
-            showToast('Proyecto importado', 'success');
-          } catch (err) {
-            showToast('Error al importar JSON: ' + err.message, 'error');
-          }
-        });
-        input.click();
+        showConfirm('Esto reemplazará el proyecto actual. Las imágenes deben estar disponibles en este dispositivo.').then(confirmed => {
+          if (!confirmed) return;
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.json';
+          input.addEventListener('change', async e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+              const text = await file.text();
+              const data = JSON.parse(text);
+              await deserializeState(data);
+              showToast('Proyecto importado', 'success');
+            } catch (err) {
+              showToast('Error al importar JSON: ' + err.message, 'error');
+            }
+          });
+          input.click();
+        }); // end showConfirm.then
       });
 
       // Task 5: Controles de reproducción
@@ -3505,7 +3559,7 @@
         if (e.ctrlKey && e.shiftKey && e.key === 'z')  { e.preventDefault(); redo(); return; }
         if (e.ctrlKey && e.key === 'y')                 { e.preventDefault(); redo(); return; }
 
-        const deleteCurrentSlide = () => {
+        const deleteCurrentSlide = async () => {
           if (state.slides.length === 0) return;
           const slide = state.slides[state.currentIndex];
           const ov = slide.overrides || {};
@@ -3514,7 +3568,7 @@
             ov.transition  && `transición (${ov.transition})`,
             ov.textMode === 'own' && 'texto propio',
           ].filter(Boolean);
-          if (items.length === 0 || confirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
+          if (items.length === 0 || await showConfirm(`Este slide tiene: ${items.join(', ')}. ¿Eliminar de todas formas?`)) {
             removeSlide(slide.id);
           }
         };
