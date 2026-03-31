@@ -385,9 +385,10 @@
     #contextMenu button:hover { background: var(--s3); }
 
     /* Config panels */
-    #configPanels { display: flex; flex-direction: column; gap: 1px; }
+    #configPanels { display: grid; grid-template-columns: 1fr 1fr; align-items: start; align-content: start; }
 
     .config-section { border-bottom: 1px solid var(--border); }
+    .config-section:nth-child(odd) { border-right: 1px solid var(--border); }
     .ov-subsection { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
     .section-toggle {
       display: flex; align-items: center; justify-content: space-between;
@@ -2213,35 +2214,38 @@
         </div>
         <div id="presetList" class="preset-list"></div>
       `;
-      container.appendChild(collapsibleSection('canvas', 'Canvas', canvasHTML, true));
-
-      // --- SECCIÓN FONDO ---
+      // --- SECCIÓN LIENZO (Canvas + Fondo) ---
       const bgHTML = `
-        <div class="cfg-row">
-          <span class="cfg-label">Blur imagen <span class="cfg-value" id="lblBgBlur">${state.config.bgBlur}</span></span>
-          <input type="range" id="sliderBgBlur" min="0" max="100" value="${state.config.bgBlur}">
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label">Color fondo</span>
-          <input type="color" id="pickBgColor" value="${state.config.bgColor}">
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label">Imagen personalizada</span>
-          <button class="pill" id="btnBgImage">Subir PNG/JPG</button>
-        </div>
-        <div class="cfg-row" id="rowBgImagePreview" style="display:${state.config.bgImageId ? 'flex' : 'none'}">
-          <img id="bgImagePreview" src="">
-          <div style="display:flex;flex-direction:column;gap:4px">
-            <input type="range" id="sliderBgImageBlur" min="0" max="100" value="${state.config.bgImageBlur ?? 0}">
-            <button class="pill" id="btnBgImageRemove" style="color:var(--red)">Quitar</button>
+        <div class="ov-subsection">
+          <div class="cfg-row" style="margin-bottom:8px">
+            <span class="cfg-label" style="font-weight:500;color:var(--text)">Fondo</span>
           </div>
+          <div class="cfg-row">
+            <span class="cfg-label">Blur imagen <span class="cfg-value" id="lblBgBlur">${state.config.bgBlur}</span></span>
+            <input type="range" id="sliderBgBlur" min="0" max="100" value="${state.config.bgBlur}">
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-label">Color fondo</span>
+            <input type="color" id="pickBgColor" value="${state.config.bgColor}">
+          </div>
+          <div class="cfg-row">
+            <span class="cfg-label">Imagen personalizada</span>
+            <button class="pill" id="btnBgImage">Subir PNG/JPG</button>
+          </div>
+          <div class="cfg-row" id="rowBgImagePreview" style="display:${state.config.bgImageId ? 'flex' : 'none'}">
+            <img id="bgImagePreview" src="">
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <input type="range" id="sliderBgImageBlur" min="0" max="100" value="${state.config.bgImageBlur ?? 0}">
+              <button class="pill" id="btnBgImageRemove" style="color:var(--red)">Quitar</button>
+            </div>
+          </div>
+          <input type="file" id="bgImageInput" accept="image/jpeg,image/png" hidden>
         </div>
-        <input type="file" id="bgImageInput" accept="image/jpeg,image/png" hidden>
       `;
-      container.appendChild(collapsibleSection('bg', 'Fondo', bgHTML));
+      container.appendChild(collapsibleSection('lienzo', 'Lienzo', canvasHTML + bgHTML, true));
 
-      // --- SECCIÓN TIMING ---
-      const timingHTML = `
+      // --- SECCIÓN RITMO (Timing + Transición) ---
+      const ritmoHTML = `
         <div class="cfg-row">
           <span class="cfg-label">Duración slide (s)</span>
           <input type="number" class="cfg-input" id="inputSlideDuration" value="${state.config.slideDuration}" min="0.1" step="0.1">
@@ -2250,25 +2254,28 @@
           <span class="cfg-label">Duración transición (s)</span>
           <input type="number" class="cfg-input" id="inputTransDuration" value="${state.config.transitionDuration}" min="0" step="0.1">
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-top:6px">La transición se añade entre slides — no consume el tiempo del slide</p>
-      `;
-      container.appendChild(collapsibleSection('timing', 'Timing', timingHTML));
-
-      // --- SECCIÓN TRANSICIONES ---
-      const transHTML = `
-        <div class="pill-group" id="pillTransition">
-          ${[
-            ['fade','Fade'],['slide','Slide'],['zoom-punch','Zoom Punch'],
-            ['wipe','Wipe'],['cross-zoom','Cross-Zoom'],['flash','Flash'],['random','Random']
-          ].map(([v,l]) =>
-            `<button class="pill${state.config.transition === v ? ' active' : ''}" data-trans="${v}">${l}</button>`
-          ).join('')}
+        <div class="cfg-row" style="margin-top:6px">
+          <span class="cfg-label">Duración total</span>
+          <span class="cfg-value" id="durationEstimate">–</span>
         </div>
-        <div class="transition-opts" id="transitionOpts"></div>
+        <div class="ov-subsection">
+          <div class="cfg-row" style="margin-bottom:8px">
+            <span class="cfg-label" style="font-weight:500;color:var(--text)">Transición</span>
+          </div>
+          <div class="pill-group" id="pillTransition">
+            ${[
+              ['fade','Fade'],['slide','Slide'],['zoom-punch','Zoom Punch'],
+              ['wipe','Wipe'],['cross-zoom','Cross-Zoom'],['flash','Flash'],['random','Random']
+            ].map(([v,l]) =>
+              `<button class="pill${state.config.transition === v ? ' active' : ''}" data-trans="${v}">${l}</button>`
+            ).join('')}
+          </div>
+          <div class="transition-opts" id="transitionOpts"></div>
+        </div>
       `;
-      container.appendChild(collapsibleSection('transitions', 'Transición', transHTML));
+      container.appendChild(collapsibleSection('ritmo', 'Ritmo', ritmoHTML));
 
-      // --- SECCIÓN EXPORTACIÓN ---
+      // --- SECCIÓN EXPORTAR ---
       const exportHTML = `
         <div class="cfg-row">
           <span class="cfg-label">FPS</span>
@@ -2301,22 +2308,21 @@
           <span class="cfg-value" id="exportEstimate">–</span>
         </div>
       `;
-      container.appendChild(collapsibleSection('export', 'Exportación', exportHTML));
+      container.appendChild(collapsibleSection('export', 'Exportar', exportHTML));
 
-      // --- SECCIÓN TEXTO GLOBAL ---
-      const textoSection = collapsibleSection('texto', 'Texto Global', '');
-      const textoBody = textoSection.querySelector('.section-body');
-      // Ensure globalText exists
+      // --- SECCIÓN CAPAS (Texto + Overlays + Audio) ---
+      const capasSection = collapsibleSection('capas', 'Capas', '');
+      const capasBody = capasSection.querySelector('.section-body');
+
+      // Texto
       if (!state.config.globalText) state.config.globalText = makeDefaultText();
       const textControls = buildTextControls(state.config.globalText,
         () => { renderFrame(); },
         () => { pushUndo(); debouncedSave(); });
-      textoBody.appendChild(textControls);
-      container.appendChild(textoSection);
-
-      // --- SECCIÓN OVERLAYS GLOBALES ---
-      const overlaysSection = collapsibleSection('overlays', 'Overlays Globales', '');
-      const overlaysBody = overlaysSection.querySelector('.section-body');
+      const textoSubsection = document.createElement('div');
+      textoSubsection.innerHTML = `<div class="cfg-row" style="margin-bottom:8px"><span class="cfg-label" style="font-weight:500;color:var(--text)">Texto</span></div>`;
+      textoSubsection.appendChild(textControls);
+      capasBody.appendChild(textoSubsection);
 
       // Marca de agua
       const wmDiv = document.createElement('div');
@@ -2340,14 +2346,11 @@
           </div>
         </div>
       `;
-      overlaysBody.appendChild(wmDiv);
+      capasBody.appendChild(wmDiv);
 
       // Marco
       const frameDiv = document.createElement('div');
       frameDiv.className = 'ov-subsection';
-      frameDiv.style.borderTop = '1px solid var(--border)';
-      frameDiv.style.paddingTop = '10px';
-      frameDiv.style.marginTop = '6px';
       frameDiv.innerHTML = `
         <div class="cfg-row" style="margin-bottom:8px">
           <span class="cfg-label" style="font-weight:500;color:var(--text)">Marco</span>
@@ -2363,14 +2366,11 @@
           </div>
         </div>
       `;
-      overlaysBody.appendChild(frameDiv);
+      capasBody.appendChild(frameDiv);
 
-      // Vignette
+      // Viñeta
       const vigDiv = document.createElement('div');
       vigDiv.className = 'ov-subsection';
-      vigDiv.style.borderTop = '1px solid var(--border)';
-      vigDiv.style.paddingTop = '10px';
-      vigDiv.style.marginTop = '6px';
       vigDiv.innerHTML = `
         <div class="cfg-row" style="margin-bottom:8px">
           <span class="cfg-label" style="font-weight:500;color:var(--text)">Viñeta</span>
@@ -2384,13 +2384,12 @@
           <input type="color" id="pickVignetteColor" value="${state.config.vignetteColor ?? '#000000'}">
         </div>
       `;
-      overlaysBody.appendChild(vigDiv);
+      capasBody.appendChild(vigDiv);
 
-      container.appendChild(overlaysSection);
-
-      // --- SECCIÓN AUDIO ---
-      const audioSection = collapsibleSection('audio', 'Audio', '');
-      const audioBody = audioSection.querySelector('.section-body');
+      // Audio
+      const audioSubDiv = document.createElement('div');
+      audioSubDiv.className = 'ov-subsection';
+      audioSubDiv.innerHTML = `<div class="cfg-row" style="margin-bottom:8px"><span class="cfg-label" style="font-weight:500;color:var(--text)">Audio</span></div>`;
 
       const audioDrop = document.createElement('div');
       audioDrop.className = 'audio-drop';
@@ -2433,17 +2432,17 @@
         </div>
       `;
 
-      audioBody.appendChild(audioDrop);
-      audioBody.appendChild(audioInput);
-      audioBody.appendChild(audioControls);
+      audioSubDiv.appendChild(audioDrop);
+      audioSubDiv.appendChild(audioInput);
+      audioSubDiv.appendChild(audioControls);
+      capasBody.appendChild(audioSubDiv);
 
-      // Show controls if audio already loaded
       if (au?.id) {
         audioDrop.style.display = 'none';
         audioControls.style.display = 'block';
       }
 
-      container.appendChild(audioSection);
+      container.appendChild(capasSection);
 
       // Hidden file inputs for overlay uploads
       const wmInput = document.createElement('input');
@@ -3098,11 +3097,23 @@
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
+    function updateDurationEstimate() {
+      const el = document.getElementById('durationEstimate');
+      if (!el) return;
+      const n = state.slides.length;
+      if (n === 0) { el.textContent = '–'; return; }
+      const total = n * state.config.slideDuration + Math.max(0, n - 1) * state.config.transitionDuration;
+      const m = Math.floor(total / 60);
+      const s = (total % 60).toFixed(1);
+      el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+    }
+
     function updateExportEstimate() {
       const el = document.getElementById('exportEstimate');
       if (!el) return;
       const bytes = estimateSizeBytes(state.config, state.slides.length);
       el.textContent = bytes > 0 ? formatBytes(bytes) : '–';
+      updateDurationEstimate();
     }
 
     function checkWebCodecsSupport() {
@@ -3825,8 +3836,8 @@
             textObj.position.y = pos.y;
             renderFrame();
             // Sync position sliders if global text controls are visible
-            const xSlider = document.querySelector('#section-texto .tc-pos-x');
-            const ySlider = document.querySelector('#section-texto .tc-pos-y');
+            const xSlider = document.querySelector('#section-capas .tc-pos-x');
+            const ySlider = document.querySelector('#section-capas .tc-pos-y');
             if (xSlider) { xSlider.value = pos.x; xSlider.closest('.text-controls').querySelector('.tc-pos-x-val').textContent = pos.x.toFixed(2); }
             if (ySlider) { ySlider.value = pos.y; ySlider.closest('.text-controls').querySelector('.tc-pos-y-val').textContent = pos.y.toFixed(2); }
             // Also sync per-slide override panel sliders if in 'own' mode

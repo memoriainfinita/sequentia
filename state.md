@@ -60,6 +60,21 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-31 (sesión 20) — Reorganización UI: grid 2 columnas + fusión de secciones
+
+**Hecho:**
+- Config panel: 8 secciones → 4 secciones en grid 2×2
+  - Canvas + Fondo → **Lienzo**
+  - Timing + Transición → **Ritmo**
+  - Texto Global + Overlays Globales + Audio → **Capas**
+  - Exportación → **Exportar**
+- CSS `#configPanels`: `display: grid; grid-template-columns: 1fr 1fr; align-items: start; align-content: start`
+- Referencias `#section-texto` → `#section-capas` en canvas drag handler
+- Duración total dinámica en sección Ritmo: `N × slideDuration + (N-1) × transitionDuration`, formato `Xm Xs`
+- `updateDurationEstimate()` llamada desde `updateExportEstimate()`
+
+**Próximo paso:** continuar con pruebas o nuevas features
+
 ### 2026-03-31 (sesión 19) — Audio bugs + export fallback
 
 **Hecho:**
