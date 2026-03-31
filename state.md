@@ -1,6 +1,6 @@
 ---
 created: 2026-03-28
-last_updated: 2026-04-01
+last_updated: 2026-03-31
 version: 1.0
 ---
 
@@ -59,6 +59,16 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - Ken Burns sin configuración expuesta — efectos automáticos. Confirmado 2026-03.
 
 ## History
+
+### 2026-03-31 (sesión 19) — Audio bugs + export fallback
+
+**Hecho:**
+- Fix toast doble al cargar audio: `stopPropagation` en `dragover`/`drop` de `#audioDrop` — el evento ya no burbujea hasta el handler de slides en `#panelCenter`
+- Fix audio no vuelve al inicio: `goToSlide(0)` resetea `audioEl.currentTime` a `trimIn`
+- Fix audio no suena tras recargar: `restoreAudioBlob()` se llamaba antes de que `buildConfigPanels()` creara `#audioEl`. Fix en dos puntos: en `main()` (flujo de reload vía `loadAndRestoreProject`) y en `applyStateSnapshot` (undo/redo)
+- Fix export de audio: Firefox no soporta AAC encoding en WebCodecs `AudioEncoder` (confirmado con `isConfigSupported` en main thread). Solución: check AAC antes de procesar audio en `prepareExportPayload`; si no soportado, exporta vídeo sin audio + toast informativo. Preview de audio no afectado.
+
+**Próximo paso:** prueba completa en Firefox — export vídeo sin audio, preview audio OK
 
 ### 2026-03-31 (sesión 18) — Export engine rewrite + browser diagnosis
 
