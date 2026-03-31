@@ -1859,9 +1859,9 @@
 
     let _randomTransition = 'fade';
 
+    const RANDOM_POOL = ['fade', 'slide-left', 'slide-right', 'slide-up', 'slide-down', 'zoom-punch', 'wipe-left', 'wipe-right', 'wipe-up', 'wipe-down', 'cross-zoom', 'flash'];
     function pickRandomTransition() {
-      const list = TRANSITIONS_LIST;
-      return list[Math.floor(Math.random() * list.length)];
+      return RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)];
     }
 
     function drawTransition(ctx, slideA, slideB, t, w, h) {
@@ -2764,6 +2764,25 @@
         } catch(err) {
           console.warn('Failed to restore frame image:', err);
           state.config.frame = null;
+        }
+      }
+      // Background image
+      if (state.config.bgImageId) {
+        try {
+          const rec = await dbGet('images', state.config.bgImageId);
+          if (rec?.blob) {
+            state.config._bgBitmap = await createImageBitmap(rec.blob, { imageOrientation: 'from-image' });
+            const url = URL.createObjectURL(rec.blob);
+            const img = document.getElementById('bgImagePreview');
+            if (img) img.src = url;
+          } else {
+            state.config.bgImageId = null;
+            state.config._bgBitmap = null;
+          }
+        } catch(err) {
+          console.warn('Failed to restore background image:', err);
+          state.config.bgImageId = null;
+          state.config._bgBitmap = null;
         }
       }
     }
@@ -4257,7 +4276,7 @@ function transitionFlashW(ctx, slideA, slideB, t, w, h, config) {
 }
 
 let _workerRandomTransition = 'fade';
-const TRANSITIONS_LIST_W = ['fade', 'slide', 'zoom-punch', 'wipe', 'cross-zoom', 'flash'];
+const RANDOM_POOL_W = ['fade', 'slide-left', 'slide-right', 'slide-up', 'slide-down', 'zoom-punch', 'wipe-left', 'wipe-right', 'wipe-up', 'wipe-down', 'cross-zoom', 'flash'];
 
 function renderSlideWorker(ctx, slideA, slideB, t, w, h, transition, config) {
   if (!slideB || transition === 'none') {
@@ -4267,7 +4286,7 @@ function renderSlideWorker(ctx, slideA, slideB, t, w, h, transition, config) {
 
   let tr = transition;
   if (tr === 'random') {
-    if (t < 0.01) _workerRandomTransition = TRANSITIONS_LIST_W[Math.floor(Math.random() * TRANSITIONS_LIST_W.length)];
+    if (t < 0.01) _workerRandomTransition = RANDOM_POOL_W[Math.floor(Math.random() * RANDOM_POOL_W.length)];
     tr = _workerRandomTransition;
   }
 
