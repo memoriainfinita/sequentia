@@ -335,6 +335,12 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - [x] **Panel derecho: miniaturas no deben redimensionarse** — `.thumb` ahora tiene `height: 72px; flex-shrink: 0`.
 - [x] **Header: quitar toggle Loop** — Eliminado del header, solo queda en `#playControls`.
 
+**Bugs audio (detectados en sesión 19, 2026-03-31)**
+- [x] **Toast doble al cargar audio** — Drop de audio burbujeaba hasta handler de slides en `#panelCenter`. Fix: `stopPropagation` en `dragover`/`drop` de `#audioDrop`.
+- [x] **Audio no vuelve al inicio** — `goToSlide(0)` ahora resetea `audioEl.currentTime` a `trimIn`.
+- [x] **Audio no suena tras recargar** — `restoreAudioBlob()` se ejecutaba antes de que `buildConfigPanels()` creara `#audioEl`. Movido a después de `buildConfigPanels` en `main()` y en `applyStateSnapshot`.
+- [x] **Export de audio falla en Firefox** — Firefox no soporta AAC en WebCodecs `AudioEncoder`. Solución: check `isConfigSupported` antes de procesar audio; si no soportado, exporta sin audio + toast informativo. Limitación conocida y aceptada.
+
 ## Decisiones de arquitectura (post-auditoría 2026-03-28)
 
 - **Muxer:** Mediabunny (sucesor activo de mp4-muxer, mismo autor, ESM CDN)
