@@ -1667,6 +1667,7 @@
           if (hasNext && transDur > 0) {
             _inTransition = true;
             _transElapsed = 0;
+            _randomTransition = pickRandomTransition();
           } else if (hasNext && transDur === 0) {
             // Sin transición — saltar directamente
             _slideElapsed = 0;
@@ -1869,7 +1870,6 @@
       let transition = getEffectiveTransition(slideA);
 
       if (transition === 'random') {
-        if (t < 0.01) _randomTransition = pickRandomTransition();
         transition = _randomTransition;
       }
 
