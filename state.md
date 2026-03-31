@@ -64,14 +64,15 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 **Hecho:**
 - Commit docs: CLAUDE.md y spec actualizados a v2.1 (mediabunny, IndexedDB, 7 transiciones)
-- Fix random transition: `RANDOM_POOL` y `RANDOM_POOL_W` con todas las variantes direccionales (`slide-left/right/up/down`, `wipe-left/right/up/down`), excluye `'random'` y bare `'slide'`/`'wipe'`
-- Fix bgImage persistence: `restoreOverlayImages()` ahora reconstruye `_bgBitmap` desde IndexedDB y actualiza el `src` del preview en UI
-- **Diagnóstico export:** error `DOMException: invalid transferable array for structured clone` en `worker.postMessage`. El export engine completo está roto — la API de mediabunny usada en la implementación (`Output`, `BufferTarget`, `EncodedVideoPacketSource`, `EncodedPacket`, etc.) nunca se verificó contra la API real. El plan original pedía `Muxer`/`ArrayBufferTarget`/`muxer.addVideoChunk()` pero el implementador asumió una API diferente sin confirmar. Toda la implementación del export engine hay que rehacerla.
+- Fix random transition pool: `RANDOM_POOL`/`RANDOM_POOL_W` con todas las variantes direccionales; excluye `'random'` y bare `'slide'`/`'wipe'`
+- Fix random transition trigger: la condición `t < 0.01` nunca disparaba (primer frame ≈ 0.016 a 60fps/1s). Fix: elegir en `_tick` cuando `_inTransition = true`, no dentro de `drawTransition`. Verificado — funciona.
+- Fix bgImage persistence: `restoreOverlayImages()` reconstruye `_bgBitmap` desde IndexedDB y actualiza src del preview
+- **Diagnóstico export:** `DOMException: invalid transferable array for structured clone` en `worker.postMessage`. El export engine está roto — la API de mediabunny implementada (`Output`, `BufferTarget`, `EncodedVideoPacketSource`, `EncodedPacket`, etc.) nunca se verificó. El plan original pedía `Muxer`/`ArrayBufferTarget`/`muxer.addVideoChunk()`. Hay que rehacer toda la implementación del export engine.
 
 **Próximo paso (sesión nueva) — CRÍTICO:**
-1. Investigar API real de mediabunny: cargar `https://esm.sh/mediabunny?bundle` y leer los exports disponibles, o consultar docs/repo de mediabunny
-2. Reescribir el worker completo (`#worker-src`) y `prepareExportPayload`/`startExport` usando la API confirmada
-3. Verificar que export produce MP4 válido (sin audio primero, luego con audio)
+1. Investigar API real de mediabunny: repo/docs o inspeccionar los exports del bundle en `https://esm.sh/mediabunny?bundle`
+2. Reescribir el worker (`#worker-src`) y `prepareExportPayload`/`startExport` con la API confirmada
+3. Verificar export sin audio primero, luego con audio
 
 ### 2026-03-31 — Sesión 15: Fixes bugs funcionales
 
