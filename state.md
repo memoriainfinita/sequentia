@@ -60,6 +60,23 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-31 — Sesión 14: UX + preview redimensionable
+
+**Hecho:**
+- Loop eliminado del header (solo en playControls)
+- Miniaturas: `height: 72px; flex-shrink: 0` — ya no se encogen con muchas imágenes
+- Botón "Ir al inicio" (⏮) añadido en controles normales y overlay fullscreen; `btnFirst`/`fsoFirst` deshabilitado en slide 0
+- Prev/Next cambiados a ← → para no confundir con play (▶)
+- Preview redimensionable: drag handle entre preview y config, rango 20%-75%, persiste en localStorage; `updateCanvasSize()` llamado durante el drag con reflow forzado
+- `maxH` en `updateCanvasSize` descuenta altura de `#playControls` para ratio correcto
+- Valor guardado en localStorage se aplica al cargar con reflow + `updateCanvasSize()` inmediato
+- Wipe left/right intercambiados: corregido en `transitionWipe` y `transitionWipeW`
+- Badge `#canvasInfo` oculto al entrar en fullscreen, restaurado al salir
+
+**Próximo paso:** bugs funcionales — CORS Mediabunny (crítico), blur, fondo personalizado, seek audio, preset prompt.
+
+---
+
 ### 2026-03-31 — Sesión 13: Fixes de prueba manual
 
 **Hecho:**
@@ -257,15 +274,15 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 **Bugs funcionales**
 - [ ] **Blur: salto al pasar de 0 a 1** — En `drawSlide()`, cuando `bgBlur` pasa de 0 a cualquier valor > 0, la lógica de renderizado cambia bruscamente (cover sin blur vs blur con padding 10%). La imagen da un salto visible. Unificar el path de renderizado para que sea continuo.
 - [ ] **Fondo personalizado no se aplica** — Cuando hay imagen de fondo personalizada (`bgImageId` set) o color sólido, se sigue mostrando la imagen del slide repetida como fondo. Bug en `drawSlide()` — revisar la lógica de selección: si `bgImageId` → usar imagen personalizada; si no → blur del slide; `bgColor` siempre como capa base.
-- [ ] **Transición Wipe = Slide Down** — `transitionWipe()` en alguna dirección produce el mismo resultado visual que Slide. Revisar `transitionWipe` vs `transitionSlide` — probablemente error en el cálculo de offset/clip.
+- [x] **Transición Wipe left/right intercambiadas** — corregido en `transitionWipe` y `transitionWipeW`: left ahora entra desde la derecha, right desde la izquierda.
 - [ ] **Seek de audio no se mueve durante reproducción** — El slider `#audioSeek` no tiene listener `timeupdate` → no refleja la posición actual. Añadir: `audioEl.addEventListener('timeupdate', () => { seekSlider.value = audioEl.currentTime; })`. También debe respetar trimIn/trimOut como rango del slider.
 - [ ] **Preset guardar lanza prompt() nativo** — `prompt('Nombre del preset:')` → reemplazar con modal personalizado (igual que `confirm()` → `showConfirm()`). Añadir `showPrompt(msg)` que devuelve Promise<string|null>.
-- [ ] **Fullscreen: info de resolución no se oculta** — El badge "16:9 • 720p" en la esquina inferior izquierda del canvas sigue visible en pantalla completa aunque el resto del overlay se auto-oculte. Ocultar ese elemento al entrar en fullscreen.
+- [x] **Fullscreen: info de resolución no se oculta** — `#canvasInfo` ahora se oculta en `_enterFullscreenUI` y se restaura en `_exitFullscreenUI`.
 
 **Ajustes de UX**
-- [ ] **Fullscreen: falta botón reiniciar (ir al principio)** — El overlay de fullscreen tiene Prev/Play-Pause/Next/Exit pero no tiene un botón de Stop/Reiniciar (equivalente a tecla R). Añadir botón que llame `goToSlide(0); pause()` o similar.
-- [ ] **Panel derecho: miniaturas no deben redimensionarse** — Cuando hay muchas imágenes, las miniaturas se encogen para caber. El panel debe tener scroll vertical con altura fija por miniatura, no ajustar tamaño. Revisar CSS de `#thumbList` y `.thumb`.
-- [ ] **Header: quitar toggle Loop** — El toggle Loop en el header es redundante; ya existe en los controles de reproducción bajo el canvas. Eliminar del header (mantener solo en playControls).
+- [x] **Fullscreen: falta botón reiniciar (ir al principio)** — Añadido `btnFirst`/`fsoFirst` (⏮) en controles normales y fullscreen. Prev/Next cambiados a ← →.
+- [x] **Panel derecho: miniaturas no deben redimensionarse** — `.thumb` ahora tiene `height: 72px; flex-shrink: 0`.
+- [x] **Header: quitar toggle Loop** — Eliminado del header, solo queda en `#playControls`.
 
 ## Decisiones de arquitectura (post-auditoría 2026-03-28)
 
