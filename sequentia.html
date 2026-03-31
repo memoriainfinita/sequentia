@@ -3350,10 +3350,11 @@
       const bitrate = (bitrates[state.config.quality] || bitrates.medium)[state.config.resolution] || 8_000_000;
 
       const slides = await Promise.all(state.slides.map(async (slide) => {
-        const bitmap = slide._bitmap ?? await createImageBitmap(
-          await (await fetch(slide.blobUrl)).blob(),
-          { imageOrientation: 'from-image' }
-        );
+        // Create a fresh bitmap for the worker — never transfer slide._bitmap directly
+        // (transferring it would detach it and break the main-thread preview renderer)
+        const bitmap = slide._bitmap
+          ? await createImageBitmap(slide._bitmap)
+          : await createImageBitmap(await (await fetch(slide.blobUrl)).blob(), { imageOrientation: 'from-image' });
         return {
           bitmap,
           duration: slide.overrides?.duration ?? state.config.slideDuration,
@@ -3413,10 +3414,20 @@
       const MEDIABUNNY_CDN = 'https://esm.sh/mediabunny?bundle';
       let mbBlobUrl;
       try {
-        const mbText = await fetch(MEDIABUNNY_CDN).then(r => {
+        let mbText = await fetch(MEDIABUNNY_CDN).then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.text();
         });
+        // esm.sh returns a re-export stub (e.g. export * from "/pkg@x.y.z/bundle.mjs")
+        // Follow it to get the actual self-contained bundle — blob workers can't resolve relative paths from esm.sh
+        const reExportMatch = mbText.match(/export \* from ['"](\/.+?)['"]/);
+        if (reExportMatch) {
+          const bundleUrl = 'https://esm.sh' + reExportMatch[1];
+          mbText = await fetch(bundleUrl).then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.text();
+          });
+        }
         mbBlobUrl = URL.createObjectURL(new Blob([mbText], { type: 'text/javascript' }));
       } catch (err) {
         showToast('No se puede cargar el motor de exportación. Verifica la conexión a internet.', 'error');
@@ -3424,8 +3435,7 @@
         return;
       }
 
-      let workerSrc = document.getElementById('worker-src').textContent;
-      workerSrc = workerSrc.replace(MEDIABUNNY_CDN, mbBlobUrl);
+      const workerSrc = document.getElementById('worker-src').textContent;
       const blob = new Blob([workerSrc], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
       const worker = new Worker(workerUrl, { type: 'module' });
@@ -3497,7 +3507,7 @@
         }
       };
 
-      worker.postMessage({ type: 'start', payload }, transferables);
+      worker.postMessage({ type: 'start', payload, mbUrl: mbBlobUrl }, transferables);
     }
 
     // ── Init ─────────────────────────────────────────────────────────
@@ -3837,23 +3847,30 @@
 
   <!-- Worker source stored as text/plain so < operators are not parsed as HTML tags -->
   <script type="text/plain" id="worker-src">
-import { Output, BufferTarget, Mp4OutputFormat, EncodedVideoPacketSource, EncodedAudioPacketSource, EncodedPacket } from 'https://esm.sh/mediabunny?bundle';
-
+// No static import — use dynamic import to avoid Chrome's cross-origin redirect restriction on top-level worker scripts
+let MB = null;
 let cancelled = false;
 self.onmessage = async (e) => {
   if (e.data.type === 'cancel') { cancelled = true; return; }
-  if (e.data.type === 'start') await runExport(e.data.payload);
+  if (e.data.type === 'start') {
+    MB = await import(e.data.mbUrl);
+    await runExport(e.data.payload);
+  }
 };
 
 async function runExport(payload) {
   cancelled = false;
+  const { Output, BufferTarget, Mp4OutputFormat, CanvasSource, EncodedAudioPacketSource } = MB;
   const { slides, config, audioData } = payload;
   const { w, h, fps, bitrate, transitionDuration } = config;
+
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d');
 
   const bufferTarget = new BufferTarget();
   const output = new Output({ format: new Mp4OutputFormat(), target: bufferTarget });
 
-  const videoSource = new EncodedVideoPacketSource('avc');
+  const videoSource = new CanvasSource(canvas, { codec: 'avc', bitrate });
   output.addVideoTrack(videoSource);
 
   let audioSource = null;
@@ -3864,83 +3881,53 @@ async function runExport(payload) {
 
   await output.start();
 
-  // VideoEncoder output callback is synchronous — buffer chunks, add to source after flush
-  const videoChunks = [];
-  const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => videoChunks.push({ chunk, meta }),
-    error: e => self.postMessage({ type: 'error', msg: e.message }),
-  });
-  await videoEncoder.configure({ codec: 'avc1.4d001f', width: w, height: h, bitrate, framerate: fps });
-
-  const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext('2d');
-
   const totalDuration = slides.reduce((sum, s) => sum + s.duration, 0)
                       + Math.max(0, slides.length - 1) * transitionDuration;
   const totalFrames = Math.round(totalDuration * fps);
   let frameIndex = 0;
-  let timestamp = 0; // microseconds
-  const frameDurationUs = Math.round(1_000_000 / fps);
+  let timestamp = 0; // seconds
+  const frameDurationSec = 1 / fps;
 
   for (let si = 0; si < slides.length; si++) {
-    if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+    if (cancelled) { self.postMessage({ type: 'cancelled' }); return; }
     const slide = slides[si];
     const slideFrames = Math.round(slide.duration * fps);
     const transFrames = si < slides.length - 1 ? Math.round(transitionDuration * fps) : 0;
     const nextSlide = si < slides.length - 1 ? slides[si + 1] : null;
 
     for (let f = 0; f < slideFrames; f++) {
-      if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+      if (cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       const t = slideFrames > 1 ? f / (slideFrames - 1) : 0;
       renderSlideWorker(ctx, slide, null, t, w, h, 'none', config);
-      await encodeFrame(videoEncoder, canvas, timestamp, frameDurationUs);
-      timestamp += frameDurationUs;
+      await videoSource.add(timestamp, frameDurationSec);
+      timestamp += frameDurationSec;
       frameIndex++;
       if (frameIndex % 15 === 0) self.postMessage({ type: 'progress', value: frameIndex / totalFrames });
     }
 
     if (transFrames > 0 && nextSlide) {
       for (let f = 0; f < transFrames; f++) {
-        if (cancelled) { self.postMessage({ type: 'cancelled' }); videoEncoder.close(); return; }
+        if (cancelled) { self.postMessage({ type: 'cancelled' }); return; }
         const t = transFrames > 1 ? f / (transFrames - 1) : 0;
         renderSlideWorker(ctx, slide, nextSlide, t, w, h, slide.transition || 'fade', config);
-        await encodeFrame(videoEncoder, canvas, timestamp, frameDurationUs);
-        timestamp += frameDurationUs;
+        await videoSource.add(timestamp, frameDurationSec);
+        timestamp += frameDurationSec;
         frameIndex++;
         if (frameIndex % 15 === 0) self.postMessage({ type: 'progress', value: frameIndex / totalFrames });
       }
     }
   }
 
-  await videoEncoder.flush();
-  videoEncoder.close();
-
-  // Add buffered video chunks to source (must be sequential and awaited)
-  for (const { chunk, meta } of videoChunks) {
-    await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-  }
-  videoSource.close();
-
   if (audioData && audioSource) {
     await encodeAudio(audioSource, audioData, Math.round(totalDuration * audioData.sampleRate));
-    audioSource.close();
   }
 
   await output.finalize();
   self.postMessage({ type: 'done', buffer: bufferTarget.buffer }, [bufferTarget.buffer]);
 }
 
-async function encodeFrame(encoder, canvas, timestamp, duration) {
-  const frame = new VideoFrame(canvas, { timestamp, duration });
-  const keyFrame = (timestamp === 0);
-  encoder.encode(frame, { keyFrame });
-  frame.close();
-  if (Math.round(timestamp / duration) % 30 === 0) {
-    await encoder.flush();
-  }
-}
-
 async function encodeAudio(audioSource, audioData, totalSamples) {
+  const { EncodedPacket } = MB;
   const { left, right, sampleRate } = audioData;
   const audioChunks = [];
   const audioEncoder = new AudioEncoder({

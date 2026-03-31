@@ -12,8 +12,8 @@ version: 1.0
 - **Tipo:** App web de escritorio, archivo HTML único
 - **Ruta:** `SEQUENTIA/`
 - **Stack:** HTML + CSS + JS vanilla, sin frameworks, sin build tools
-- **Motor de exportación:** WebCodecs API + Mediabunny
-- **Browser requerido para exportar:** Chrome / Edge
+- **Motor de exportación:** Mediabunny (CanvasSource) + WebCodecs (audio)
+- **Browser requerido para exportar:** Firefox — Chrome bloquea module workers desde file:// (restricción dura, todos los métodos fallan)
 - **Serverless:** sí — abre desde `file://` sin servidor
 
 ## Spec
@@ -59,6 +59,21 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - Ken Burns sin configuración expuesta — efectos automáticos. Confirmado 2026-03.
 
 ## History
+
+### 2026-03-31 (sesión 18) — Export engine rewrite + browser diagnosis
+
+**Hecho:**
+- Export engine reescrito con API real de Mediabunny (confirmada vía TypeScript declarations):
+  - `CanvasSource(offscreenCanvas, { codec:'avc', bitrate })` — Mediabunny gestiona VideoEncoder internamente
+  - `await videoSource.add(timestamp_sec, duration_sec)` por frame — timestamps en segundos
+  - `EncodedAudioPacketSource` + `AudioEncoder` manual para audio
+- Fix bitmap transfer: `prepareExportPayload` crea copia fresca con `createImageBitmap(slide._bitmap)` — evita que la preview quede con bitmap detached
+- Fix carga de Mediabunny: fetch de dos pasos para seguir el re-export stub de esm.sh hasta el bundle real
+- Import dinámico (`await import(mbUrl)`) en lugar de import estático — evita restricción de Chrome en top-level worker imports
+- **Diagnóstico de browser:** Chrome bloquea TODOS los métodos de carga de módulos en workers desde `file://` (static import, dynamic import blob, dynamic import CDN, importScripts). Firefox los permite todos. Export verificado funcionando en Firefox.
+- Test page `examples/test-worker-import.html` creada para diagnóstico
+
+**Próximo paso:** prueba completa del export en Firefox (con audio, múltiples slides, todas las transiciones)
 
 ### 2026-03-31 (sesión 17) — Docs fix + random pool + bgImage restore + diagnóstico export
 

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Worker Import Test</title>
+<style>
+  body { font-family: monospace; background: #09090b; color: #fafafa; padding: 2rem; }
+  button { background: #f97316; color: #fff; border: none; padding: 0.5rem 1rem; cursor: pointer; margin: 0.25rem; }
+  .log { margin-top: 1rem; }
+  .ok  { color: #22c55e; }
+  .err { color: #ef4444; }
+  .inf { color: #71717a; }
+</style>
+</head>
+<body>
+<h2>Worker Import Test</h2>
+<p>Open DevTools console. Tests run from <code>file://</code>.</p>
+
+<button onclick="test1()">1 · Static import (should fail)</button>
+<button onclick="test2()">2 · Dynamic import (blob URL)</button>
+<button onclick="test3()">3 · Dynamic import (direct versioned URL)</button>
+<button onclick="test4()">4 · Dynamic import (followed bundle)</button>
+<button onclick="test5()">5 · importScripts UMD (classic worker)</button>
+
+<div class="log" id="log"></div>
+
+<script>
+const CDN_UNVERSIONED = 'https://esm.sh/mediabunny?bundle';
+const CDN_VERSIONED   = 'https://esm.sh/mediabunny@1.40.1/es2022/mediabunny.bundle.mjs';
+const CDN_JSR         = 'https://cdn.jsdelivr.net/npm/mediabunny@1.40.1/dist/mediabunny.bundle.mjs';
+
+function log(msg, cls = 'inf') {
+  const div = document.getElementById('log');
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = new Date().toISOString().slice(11,23) + '  ' + msg;
+  div.appendChild(el);
+  console.log(msg);
+}
+
+function makeModuleWorker(src) {
+  const blob = new Blob([src], { type: 'application/javascript' });
+  const url  = URL.createObjectURL(blob);
+  const w    = new Worker(url, { type: 'module' });
+  URL.revokeObjectURL(url);
+  return w;
+}
+
+function makeClassicWorker(src) {
+  const blob = new Blob([src], { type: 'application/javascript' });
+  const url  = URL.createObjectURL(blob);
+  const w    = new Worker(url);
+  URL.revokeObjectURL(url);
+  return w;
+}
+
+function runWorker(worker) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout (10s)')), 10000);
+    worker.onmessage = e => { clearTimeout(t); worker.terminate(); resolve(e.data); };
+    worker.onerror   = e => { clearTimeout(t); worker.terminate(); reject(new Error(e.message)); };
+    worker.postMessage('ping');
+  });
+}
+
+// ── Test 1: static import in module worker ──────────────────────────────────
+function test1() {
+  log('--- Test 1: static import ---');
+  const src = `
+import { Output } from '${CDN_UNVERSIONED}';
+self.onmessage = () => self.postMessage({ ok: true, exports: Object.keys({Output}) });
+`;
+  const w = makeModuleWorker(src);
+  runWorker(w)
+    .then(d => log('OK: ' + JSON.stringify(d), 'ok'))
+    .catch(e => log('FAIL: ' + e.message, 'err'));
+}
+
+// ── Test 2: dynamic import of blob URL (two-step follow) ────────────────────
+async function test2() {
+  log('--- Test 2: dynamic import (blob URL) ---');
+  try {
+    let text = await fetch(CDN_UNVERSIONED).then(r => r.text());
+    log('Step1 text: ' + text.slice(0, 120), 'inf');
+    const m = text.match(/export \* from ['"](\/.+?)['"]/);
+    if (m) {
+      const bundleUrl = 'https://esm.sh' + m[1];
+      log('Following re-export to: ' + bundleUrl, 'inf');
+      text = await fetch(bundleUrl).then(r => r.text());
+      log('Bundle first 80 chars: ' + text.slice(0, 80), 'inf');
+    }
+    const blobUrl = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    const src = `
+self.onmessage = async () => {
+  try {
+    const MB = await import(${JSON.stringify(blobUrl)});
+    self.postMessage({ ok: true, exports: Object.keys(MB) });
+  } catch(e) { self.postMessage({ ok: false, error: e.message }); }
+};`;
+    const w = makeModuleWorker(src);
+    runWorker(w)
+      .then(d => { URL.revokeObjectURL(blobUrl); log((d.ok?'OK':'FAIL') + ': ' + JSON.stringify(d), d.ok?'ok':'err'); })
+      .catch(e => { URL.revokeObjectURL(blobUrl); log('FAIL: ' + e.message, 'err'); });
+  } catch(e) { log('FAIL (fetch): ' + e.message, 'err'); }
+}
+
+// ── Test 3: dynamic import of versioned CDN URL directly ────────────────────
+function test3() {
+  log('--- Test 3: dynamic import (direct versioned URL) ---');
+  const src = `
+self.onmessage = async () => {
+  try {
+    const MB = await import(${JSON.stringify(CDN_VERSIONED)});
+    self.postMessage({ ok: true, exports: Object.keys(MB) });
+  } catch(e) { self.postMessage({ ok: false, error: e.message }); }
+};`;
+  const w = makeModuleWorker(src);
+  runWorker(w)
+    .then(d => log((d.ok?'OK':'FAIL') + ': ' + JSON.stringify(d), d.ok?'ok':'err'))
+    .catch(e => log('FAIL: ' + e.message, 'err'));
+}
+
+// ── Test 4: fetch bundle fully resolved, inspect content then import ─────────
+async function test4() {
+  log('--- Test 4: dynamic import (fully resolved blob, inspect) ---');
+  try {
+    // Follow full redirect chain via fetch
+    let res = await fetch(CDN_UNVERSIONED);
+    let text = await res.text();
+    // Follow all re-exports until we get actual code
+    let depth = 0;
+    while (text.trim().startsWith('export *') && depth++ < 5) {
+      const m = text.match(/export \* from ['"](.+?)['"]/);
+      if (!m) break;
+      const url = m[1].startsWith('/') ? 'https://esm.sh' + m[1] : m[1];
+      log('Depth ' + depth + ' → ' + url, 'inf');
+      text = await fetch(url).then(r => r.text());
+    }
+    const hasImport = /^import /m.test(text);
+    const hasExport = /^export /m.test(text);
+    log(`Final content: ${text.length} chars, starts with import: ${hasImport}, starts with export: ${hasExport}`, 'inf');
+    log('First 120 chars: ' + text.slice(0, 120), 'inf');
+
+    const blobUrl = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    const src = `
+self.onmessage = async () => {
+  try {
+    const MB = await import(${JSON.stringify(blobUrl)});
+    self.postMessage({ ok: true, keys: Object.keys(MB).slice(0,10) });
+  } catch(e) { self.postMessage({ ok: false, error: e.message }); }
+};`;
+    const w = makeModuleWorker(src);
+    runWorker(w)
+      .then(d => { URL.revokeObjectURL(blobUrl); log((d.ok?'OK':'FAIL') + ': ' + JSON.stringify(d), d.ok?'ok':'err'); })
+      .catch(e => { URL.revokeObjectURL(blobUrl); log('FAIL: ' + e.message, 'err'); });
+  } catch(e) { log('FAIL: ' + e.message, 'err'); }
+}
+
+// ── Test 5: importScripts with classic worker (UMD if available) ─────────────
+function test5() {
+  log('--- Test 5: importScripts UMD (classic worker) ---');
+  const src = `
+self.onmessage = () => {
+  try {
+    importScripts(${JSON.stringify(CDN_JSR)});
+    self.postMessage({ ok: true, msg: 'importScripts succeeded' });
+  } catch(e) { self.postMessage({ ok: false, error: e.message }); }
+};`;
+  const w = makeClassicWorker(src);
+  runWorker(w)
+    .then(d => log((d.ok?'OK':'FAIL') + ': ' + JSON.stringify(d), d.ok?'ok':'err'))
+    .catch(e => log('FAIL: ' + e.message, 'err'));
+}
+</script>
+</body>
+</html>
