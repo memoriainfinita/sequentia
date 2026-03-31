@@ -1001,6 +1001,31 @@
       });
     }
 
+    function showPrompt(msg, placeholder = '') {
+      return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'confirmOverlay';
+        overlay.innerHTML = `
+          <div id="confirmModal">
+            <p>${msg}</p>
+            <input type="text" id="promptInput" placeholder="${placeholder}" style="width:100%;padding:6px 8px;background:var(--s3);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:var(--sans);font-size:13px;margin-bottom:12px;box-sizing:border-box;">
+            <div class="confirm-btns">
+              <button class="btn-cancel">Cancelar</button>
+              <button class="btn-ok">Confirmar</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#promptInput');
+        input.focus();
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { overlay.remove(); resolve(input.value || null); }
+          if (e.key === 'Escape') { overlay.remove(); resolve(null); }
+        });
+        overlay.querySelector('.btn-cancel').addEventListener('click', () => { overlay.remove(); resolve(null); });
+        overlay.querySelector('.btn-ok').addEventListener('click',     () => { overlay.remove(); resolve(input.value || null); });
+      });
+    }
+
     // ── Task 3: Toast ────────────────────────────────────────────────
 
     function showToast(msg, type = 'info') {
@@ -1409,25 +1434,17 @@
         }
       }
 
-      // 2. Fondo con imagen del slide (blur)
-      if (slide._bitmap) {
-        if (cfg.bgBlur > 0) {
-          ctx.save();
-          ctx.filter = `blur(${cfg.bgBlur * 0.3}px)`;
-          // Cover con padding para evitar bordes cortados
-          const padding = 1.1;
-          const bw = w * padding, bh = h * padding;
-          const bx = (w - bw) / 2, by = (h - bh) / 2;
-          // Cover fit
-          const fit = calcFit(slide._bitmap.width, slide._bitmap.height, bw, bh, 'cover');
-          ctx.drawImage(slide._bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
-          ctx.filter = 'none';
-          ctx.restore();
-        } else {
-          // Cover sin blur
-          const fit = calcFit(slide._bitmap.width, slide._bitmap.height, w, h, 'cover');
-          ctx.drawImage(slide._bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
-        }
+      // 2. Fondo con imagen del slide (blur) — solo si no hay imagen de fondo personalizada
+      if (slide._bitmap && !cfg.bgImageId) {
+        ctx.save();
+        const padding = 1.1;
+        const bw = w * padding, bh = h * padding;
+        const bx = (w - bw) / 2, by = (h - bh) / 2;
+        const fit = calcFit(slide._bitmap.width, slide._bitmap.height, bw, bh, 'cover');
+        if (cfg.bgBlur > 0) ctx.filter = `blur(${cfg.bgBlur * 0.3}px)`;
+        ctx.drawImage(slide._bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+        ctx.filter = 'none';
+        ctx.restore();
       }
 
       // 3. Imagen principal (según fitMode)
@@ -2487,8 +2504,8 @@
       });
 
       // Preset save
-      document.getElementById('btnSavePreset').addEventListener('click', () => {
-        const name = prompt('Nombre del preset:');
+      document.getElementById('btnSavePreset').addEventListener('click', async () => {
+        const name = await showPrompt('Nombre del preset:');
         if (!name?.trim()) return;
         const presets = JSON.parse(localStorage.getItem('sequentia-presets') || '[]');
         if (presets.find(p => p.name === name.trim())) { showToast('Ya existe un preset con ese nombre', 'error'); return; }
@@ -2858,13 +2875,21 @@
       }
 
       // Seek scrubber (preview only)
-      document.getElementById('audioSeek').addEventListener('input', e => {
+      const seekEl = document.getElementById('audioSeek');
+      seekEl.addEventListener('input', e => {
         audioEl.currentTime = parseFloat(e.target.value);
+      });
+      audioEl.addEventListener('timeupdate', () => {
+        const el = document.getElementById('audioSeek');
+        if (el) el.value = audioEl.currentTime;
       });
 
       // Trim In
       document.getElementById('audioTrimIn').addEventListener('change', e => {
-        state.config.audio.trimIn = parseFloat(e.target.value) || 0;
+        const v = parseFloat(e.target.value) || 0;
+        state.config.audio.trimIn = v;
+        const s = document.getElementById('audioSeek');
+        if (s) s.min = v;
         pushUndo(); debouncedSave();
       });
 
@@ -2872,6 +2897,8 @@
       document.getElementById('audioTrimOut').addEventListener('change', e => {
         const v = parseFloat(e.target.value);
         state.config.audio.trimOut = isNaN(v) ? null : v;
+        const s = document.getElementById('audioSeek');
+        if (s) s.max = isNaN(v) ? (state.config.audio.duration ?? 100) : v;
         pushUndo(); debouncedSave();
       });
 
@@ -3363,7 +3390,23 @@
       const btn = document.getElementById('btnExport');
       btn.disabled = true;
 
-      const workerSrc = document.getElementById('worker-src').textContent;
+      // Fetch mediabunny from CDN in main thread to avoid CORS restrictions on file://
+      const MEDIABUNNY_CDN = 'https://esm.sh/mediabunny?bundle';
+      let mbBlobUrl;
+      try {
+        const mbText = await fetch(MEDIABUNNY_CDN).then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.text();
+        });
+        mbBlobUrl = URL.createObjectURL(new Blob([mbText], { type: 'text/javascript' }));
+      } catch (err) {
+        showToast('No se puede cargar el motor de exportación. Verifica la conexión a internet.', 'error');
+        btn.disabled = false;
+        return;
+      }
+
+      let workerSrc = document.getElementById('worker-src').textContent;
+      workerSrc = workerSrc.replace(MEDIABUNNY_CDN, mbBlobUrl);
       const blob = new Blob([workerSrc], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
       const worker = new Worker(workerUrl, { type: 'module' });
@@ -3388,6 +3431,7 @@
         resetExportButton();
         worker.terminate();
         URL.revokeObjectURL(workerUrl);
+        URL.revokeObjectURL(mbBlobUrl);
         return;
       }
 
@@ -3396,6 +3440,7 @@
         resetExportButton();
         worker.terminate();
         URL.revokeObjectURL(workerUrl);
+        URL.revokeObjectURL(mbBlobUrl);
       };
 
       worker.onmessage = async (e) => {
@@ -3414,6 +3459,7 @@
           resetExportButton();
           worker.terminate();
           URL.revokeObjectURL(workerUrl);
+          URL.revokeObjectURL(mbBlobUrl);
           playCompletionSound();
         }
         if (e.data.type === 'cancelled') {
@@ -3421,12 +3467,14 @@
           resetExportButton();
           worker.terminate();
           URL.revokeObjectURL(workerUrl);
+          URL.revokeObjectURL(mbBlobUrl);
         }
         if (e.data.type === 'error') {
           showToast('Error en exportación: ' + e.data.msg, 'error');
           resetExportButton();
           worker.terminate();
           URL.revokeObjectURL(workerUrl);
+          URL.revokeObjectURL(mbBlobUrl);
         }
       };
 
@@ -3770,7 +3818,7 @@
 
   <!-- Worker source stored as text/plain so < operators are not parsed as HTML tags -->
   <script type="text/plain" id="worker-src">
-import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/mediabunny@latest/dist/index.js';
+import { Output, BufferTarget, Mp4OutputFormat, EncodedVideoPacketSource, EncodedAudioPacketSource, EncodedPacket } from 'https://esm.sh/mediabunny?bundle';
 
 let cancelled = false;
 self.onmessage = async (e) => {
@@ -3783,16 +3831,24 @@ async function runExport(payload) {
   const { slides, config, audioData } = payload;
   const { w, h, fps, bitrate, transitionDuration } = config;
 
-  const target = new ArrayBufferTarget();
-  const muxer = new Muxer({
-    target,
-    video: { codec: 'avc', width: w, height: h },
-    audio: audioData ? { codec: 'aac', numberOfChannels: 2, sampleRate: audioData.sampleRate } : undefined,
-    fastStart: 'in-memory',
-  });
+  const bufferTarget = new BufferTarget();
+  const output = new Output({ format: new Mp4OutputFormat(), target: bufferTarget });
 
+  const videoSource = new EncodedVideoPacketSource('avc');
+  output.addVideoTrack(videoSource);
+
+  let audioSource = null;
+  if (audioData) {
+    audioSource = new EncodedAudioPacketSource('aac');
+    output.addAudioTrack(audioSource);
+  }
+
+  await output.start();
+
+  // VideoEncoder output callback is synchronous — buffer chunks, add to source after flush
+  const videoChunks = [];
   const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    output: (chunk, meta) => videoChunks.push({ chunk, meta }),
     error: e => self.postMessage({ type: 'error', msg: e.message }),
   });
   await videoEncoder.configure({ codec: 'avc1.4d001f', width: w, height: h, bitrate, framerate: fps });
@@ -3840,12 +3896,19 @@ async function runExport(payload) {
   await videoEncoder.flush();
   videoEncoder.close();
 
-  if (audioData) {
-    await encodeAudio(muxer, audioData, Math.round(totalDuration * audioData.sampleRate));
+  // Add buffered video chunks to source (must be sequential and awaited)
+  for (const { chunk, meta } of videoChunks) {
+    await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+  }
+  videoSource.close();
+
+  if (audioData && audioSource) {
+    await encodeAudio(audioSource, audioData, Math.round(totalDuration * audioData.sampleRate));
+    audioSource.close();
   }
 
-  muxer.finalize();
-  self.postMessage({ type: 'done', buffer: target.buffer }, [target.buffer]);
+  await output.finalize();
+  self.postMessage({ type: 'done', buffer: bufferTarget.buffer }, [bufferTarget.buffer]);
 }
 
 async function encodeFrame(encoder, canvas, timestamp, duration) {
@@ -3858,10 +3921,11 @@ async function encodeFrame(encoder, canvas, timestamp, duration) {
   }
 }
 
-async function encodeAudio(muxer, audioData, totalSamples) {
+async function encodeAudio(audioSource, audioData, totalSamples) {
   const { left, right, sampleRate } = audioData;
+  const audioChunks = [];
   const audioEncoder = new AudioEncoder({
-    output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+    output: (chunk, meta) => audioChunks.push({ chunk, meta }),
     error: e => self.postMessage({ type: 'error', msg: 'Audio: ' + e.message }),
   });
   audioEncoder.configure({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate, bitrate: 128_000 });
@@ -3892,6 +3956,10 @@ async function encodeAudio(muxer, audioData, totalSamples) {
   }
   await audioEncoder.flush();
   audioEncoder.close();
+
+  for (const { chunk, meta } of audioChunks) {
+    await audioSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+  }
 }
 
 // ── Worker render helpers ────────────────────────────────────────────
@@ -3942,22 +4010,17 @@ function drawSlideWorker(ctx, slide, t, w, h, config) {
     }
   }
 
-  // 2. Background blur layer using slide.bitmap
-  if (slide.bitmap) {
-    if (config.bgBlur > 0) {
-      ctx.save();
-      ctx.filter = `blur(${config.bgBlur * 0.3}px)`;
-      const padding = 1.1;
-      const bw = w * padding, bh = h * padding;
-      const bx = (w - bw) / 2, by = (h - bh) / 2;
-      const fit = calcFit(slide.bitmap.width, slide.bitmap.height, bw, bh, 'cover');
-      ctx.drawImage(slide.bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
-      ctx.filter = 'none';
-      ctx.restore();
-    } else {
-      const fit = calcFit(slide.bitmap.width, slide.bitmap.height, w, h, 'cover');
-      ctx.drawImage(slide.bitmap, fit.dx, fit.dy, fit.dw, fit.dh);
-    }
+  // 2. Background blur layer using slide.bitmap — only if no custom bg image
+  if (slide.bitmap && !config.bgBitmap) {
+    ctx.save();
+    const padding = 1.1;
+    const bw = w * padding, bh = h * padding;
+    const bx = (w - bw) / 2, by = (h - bh) / 2;
+    const fit = calcFit(slide.bitmap.width, slide.bitmap.height, bw, bh, 'cover');
+    if (config.bgBlur > 0) ctx.filter = `blur(${config.bgBlur * 0.3}px)`;
+    ctx.drawImage(slide.bitmap, bx + fit.dx, by + fit.dy, fit.dw, fit.dh);
+    ctx.filter = 'none';
+    ctx.restore();
   }
 
   // 3. Main image (fitMode)

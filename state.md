@@ -1,6 +1,6 @@
 ---
 created: 2026-03-28
-last_updated: 2026-03-31
+last_updated: 2026-04-01
 version: 1.0
 ---
 
@@ -59,6 +59,35 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - Ken Burns sin configuración expuesta — efectos automáticos. Confirmado 2026-03.
 
 ## History
+
+### 2026-04-01 — Sesión 16: Diagnóstico y fixes export + bugs
+
+**Hecho:**
+- Diagnóstico completo del error de exportación: `esm.sh/mediabunny` sin `?bundle` devuelve un meta-import con imports internos que fallan desde blob: URL → worker crash → "Error en worker: undefined" + "invalid transferable" como síntoma secundario
+- Fix: URL cambiada a `https://esm.sh/mediabunny?bundle` en `MEDIABUNNY_CDN` y en el import del worker — bundle autocontenido, sin imports externos
+- API mediabunny migrada: `Muxer/ArrayBufferTarget` → `Output/BufferTarget/Mp4OutputFormat/EncodedVideoPacketSource/EncodedAudioPacketSource/EncodedPacket`; chunks bufferizados sincrónicamente, añadidos a source con await post-flush
+- Fix blur/fondo personalizado: `drawSlide()` y `drawSlideWorker()` — paso 2 solo si `!bgImageId`; path unificado padding=1.1 siempre
+- Fix seek audio: listener `timeupdate`; trimIn/trimOut actualizan min/max del slider
+- `showPrompt()`: modal con input para guardar presets
+- Fix random transition: diagnosticado — `pickRandomTransition()` usa `TRANSITIONS_LIST` que incluye `'random'` y variantes sin dirección → pendiente fix
+- Custom bgImage no persiste: diagnosticado — `restoreOverlayImages()` no reconstruye `_bgBitmap` → pendiente fix
+
+**Próximo paso (sesión nueva):**
+1. Verificar que exportación funciona con `?bundle`
+2. Fix random: pool dedicado con todas las variantes de dirección (`slide-left`, `slide-right`, etc.)
+3. Fix bgImage persistence: añadir restore de `_bgBitmap` en `restoreOverlayImages()`
+
+### 2026-03-31 — Sesión 15: Fixes bugs funcionales
+
+**Hecho:**
+- CORS Mediabunny en `file://`: `startExport()` hace fetch en main thread → blob URL → reemplaza CDN URL en worker source antes de crearlo; revocado en todos los cleanup
+- Fondo personalizado + blur: `drawSlide()` y `drawSlideWorker()` — paso 2 solo se ejecuta si no hay `bgImageId`/`bgBitmap`; path unificado con padding=1.1 siempre (sin salto al pasar de blur 0 a >0)
+- Seek audio: `timeupdate` listener actualiza `#audioSeek`; trimIn/trimOut listeners actualizan min/max del slider
+- `showPrompt()`: nueva función (misma estructura que `showConfirm`, con `<input>`, Enter/Escape); preset save convertido a `async`
+
+**Próximo paso:** prueba manual de los bugs resueltos desde `file://` con Chrome.
+
+---
 
 ### 2026-03-31 — Sesión 14: UX + preview redimensionable
 
@@ -269,14 +298,14 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 ### Bugs y ajustes pendientes (detectados en prueba manual 2026-03-31)
 
 **Crítico (bloquea uso)**
-- [ ] **CORS Mediabunny en file://** — El worker usa `importScripts('https://cdn...')` que falla desde `file://` con CORS/MIME error. Solución: fetch mediabunny en main thread → pasar código como string al worker, o bundlear inline en el HTML. Sin esto la exportación no funciona.
+- [x] **CORS Mediabunny en file://** — Resuelto: `startExport()` hace fetch de mediabunny en main thread, crea blob URL local, reemplaza la URL en el worker source antes de crear el worker. mbBlobUrl revocado en todos los puntos de cleanup.
 
 **Bugs funcionales**
-- [ ] **Blur: salto al pasar de 0 a 1** — En `drawSlide()`, cuando `bgBlur` pasa de 0 a cualquier valor > 0, la lógica de renderizado cambia bruscamente (cover sin blur vs blur con padding 10%). La imagen da un salto visible. Unificar el path de renderizado para que sea continuo.
-- [ ] **Fondo personalizado no se aplica** — Cuando hay imagen de fondo personalizada (`bgImageId` set) o color sólido, se sigue mostrando la imagen del slide repetida como fondo. Bug en `drawSlide()` — revisar la lógica de selección: si `bgImageId` → usar imagen personalizada; si no → blur del slide; `bgColor` siempre como capa base.
+- [x] **Blur: salto al pasar de 0 a 1** — Resuelto: `drawSlide()` y `drawSlideWorker()` unifican el path (siempre padding=1.1, filter solo si bgBlur>0).
+- [x] **Fondo personalizado no se aplica** — Resuelto: paso 2 de `drawSlide()` / `drawSlideWorker()` ahora tiene condición `&& !cfg.bgImageId` / `&& !config.bgBitmap` — no dibuja el slide como fondo si hay imagen personalizada.
 - [x] **Transición Wipe left/right intercambiadas** — corregido en `transitionWipe` y `transitionWipeW`: left ahora entra desde la derecha, right desde la izquierda.
-- [ ] **Seek de audio no se mueve durante reproducción** — El slider `#audioSeek` no tiene listener `timeupdate` → no refleja la posición actual. Añadir: `audioEl.addEventListener('timeupdate', () => { seekSlider.value = audioEl.currentTime; })`. También debe respetar trimIn/trimOut como rango del slider.
-- [ ] **Preset guardar lanza prompt() nativo** — `prompt('Nombre del preset:')` → reemplazar con modal personalizado (igual que `confirm()` → `showConfirm()`). Añadir `showPrompt(msg)` que devuelve Promise<string|null>.
+- [x] **Seek de audio no se mueve durante reproducción** — Resuelto: añadido `timeupdate` listener que actualiza `#audioSeek`. Listeners de trimIn/trimOut actualizan min/max del slider.
+- [x] **Preset guardar lanza prompt() nativo** — Resuelto: añadida `showPrompt(msg)` (misma estructura que `showConfirm`, con input y Enter/Escape). Handler de preset convertido a `async`.
 - [x] **Fullscreen: info de resolución no se oculta** — `#canvasInfo` ahora se oculta en `_enterFullscreenUI` y se restaura en `_exitFullscreenUI`.
 
 **Ajustes de UX**
