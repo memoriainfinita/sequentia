@@ -60,6 +60,22 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-03-31 (sesión 21) — UX fixes + nuevas features menores
+
+**Hecho:**
+- Botón "Nueva sesión" en header: limpia IndexedDB (project + images) y recarga
+- Duración total en controles de presentación: `1 / 59 · 0:00:47` — formato `h:mm:ss`
+- `formatDuration()` helper compartido por controles y sección Ritmo
+- Contador de slides en botón añadir: `+ Añadir imágenes (59)`
+- Progreso de export: frames en lugar de % (`234 / 1770`)
+- Botón export en estado exporting: fondo oscuro + barra naranja visible + `title="Clic para cancelar"`
+- Fix thumbnail click: usa `goToSlide(i)` — actualiza preview al seleccionar con presentación parada
+- Fix icono _missing: SVG HTML en lugar de canvas (nítido a cualquier escala)
+- Fix Nueva sesión: usaba callback en lugar de `await showConfirm()`
+- Fix duración en controles no se actualizaba al cambiar timing: añadido `updatePlayControls()` en handlers de `inputSlideDuration` e `inputTransDuration`
+
+**Próximo paso:** analizar alternativa al JSON export (ZIP con imágenes incluidas)
+
 ### 2026-03-31 (sesión 20) — Reorganización UI: grid 2 columnas + fusión de secciones
 
 **Hecho:**
