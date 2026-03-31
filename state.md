@@ -1,6 +1,6 @@
 ---
 created: 2026-03-28
-last_updated: 2026-03-31
+last_updated: 2026-03-31 (sesión 22)
 version: 1.0
 ---
 
@@ -59,6 +59,26 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - Ken Burns sin configuración expuesta — efectos automáticos. Confirmado 2026-03.
 
 ## History
+
+### 2026-03-31 (sesión 22) — UX: drag reorder, layout config, modal export
+
+**Hecho:**
+- Fix drag & drop reordenación de slides: comportamiento insert-before/after en lugar de swap
+  - `dragover`: detecta mitad superior/inferior del thumb → clase `drop-before`/`drop-after`
+  - `drop`: calcula `adjustedToIdx` compensando el splice; no-op si la posición no cambia
+  - `dragend`: limpia indicadores si drag cancelado
+  - CSS: `.thumb.drop-before` / `.thumb.drop-after` con borde naranja (reemplaza `.thumb.drag-over`)
+- Layout config panel: dos columnas independientes (`div.config-col` flex) en lugar de CSS grid
+  - Izquierda: Composición + Capas a la derecha, sin que se afecten al desplegarse
+- Secciones Lienzo + Ritmo fusionadas en **Composición** (abierta por defecto)
+- Sección Exportar convertida a **modal** (`showExport()`):
+  - Mismo patrón que `showConfirm`/`showPrompt`
+  - FPS, Calidad, Nombre de archivo, compat indicator, estimación
+  - Cancelar restaura valores originales; Confirmar guarda y lanza exportación
+  - `.btn-ok.btn-export` con color accent (naranja)
+  - Handlers de FPS/Quality/Filename eliminados de `buildConfigPanels`
+
+**Próximo paso:** ninguno pendiente — app estable
 
 ### 2026-03-31 (sesión 21) — UX fixes + nuevas features menores
 

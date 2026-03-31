@@ -283,6 +283,7 @@
       font-size: 13px; font-family: var(--sans); font-weight: 500;
     }
     #confirmModal .btn-ok:hover { opacity: 0.9; }
+    #confirmModal .btn-ok.btn-export { background: var(--accent); }
 
     /* Thumbnail panel */
     #panelRight { display: flex; flex-direction: column; }
@@ -302,7 +303,8 @@
              background: var(--s3); flex-shrink: 0; }
     .thumb:hover { border-color: var(--border); }
     .thumb.selected { border-color: var(--accent); }
-    .thumb.drag-over { border-color: var(--accent2); opacity: 0.6; }
+    .thumb.drop-before { border-top-color: var(--accent); }
+    .thumb.drop-after  { border-bottom-color: var(--accent); }
     .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .thumb-num { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.6);
                  color: var(--text); font-size: 11px; font-family: var(--mono);
@@ -390,7 +392,8 @@
     #contextMenu button:hover { background: var(--s3); }
 
     /* Config panels */
-    #configPanels { display: grid; grid-template-columns: 1fr 1fr; align-items: start; align-content: start; }
+    #configPanels { display: flex; align-items: flex-start; }
+    .config-col { flex: 1; min-width: 0; }
 
     .config-section { border-bottom: 1px solid var(--border); }
     .config-section:nth-child(odd) { border-right: 1px solid var(--border); }
@@ -1033,6 +1036,88 @@
       });
     }
 
+    function showExport() {
+      return new Promise(resolve => {
+        const origFps      = state.config.fps;
+        const origQuality  = state.config.quality;
+        const origFilename = state.config.filename;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'confirmOverlay';
+        overlay.innerHTML = `
+          <div id="confirmModal" style="max-width:460px">
+            <p style="font-size:15px;font-weight:500;margin-bottom:16px">Exportar</p>
+            <div class="cfg-row">
+              <span class="cfg-label">FPS</span>
+              <div class="pill-group" id="pillFPS">
+                ${['24','30','60'].map(f =>
+                  `<button class="pill${state.config.fps == f ? ' active' : ''}" data-fps="${f}">${f}</button>`
+                ).join('')}
+              </div>
+            </div>
+            <div class="cfg-row">
+              <span class="cfg-label">Calidad</span>
+              <div class="pill-group" id="pillQuality">
+                ${[['low','Bajo'],['medium','Medio'],['high','Alto']].map(([v,l]) =>
+                  `<button class="pill${state.config.quality === v ? ' active' : ''}" data-quality="${v}">${l}</button>`
+                ).join('')}
+              </div>
+            </div>
+            <div class="cfg-row">
+              <span class="cfg-label">Archivo</span>
+              <input type="text" class="cfg-input" id="inputFilename" value="${state.config.filename}" style="flex:1">
+            </div>
+            <div class="cfg-row">
+              <div class="compat-indicator">
+                <div class="compat-dot" id="compatDot"></div>
+                <span id="compatLabel"></span>
+              </div>
+            </div>
+            <div class="cfg-row" style="margin-bottom:16px">
+              <span class="cfg-label">Estimación</span>
+              <span class="cfg-value" id="exportEstimate">–</span>
+            </div>
+            <div class="confirm-btns">
+              <button class="btn-cancel">Cancelar</button>
+              <button class="btn-ok btn-export">Exportar</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#pillFPS').addEventListener('click', e => {
+          const btn = e.target.closest('[data-fps]');
+          if (!btn) return;
+          state.config.fps = parseInt(btn.dataset.fps);
+          overlay.querySelectorAll('#pillFPS .pill').forEach(b => b.classList.toggle('active', b.dataset.fps == state.config.fps));
+          updateExportEstimate();
+        });
+        overlay.querySelector('#pillQuality').addEventListener('click', e => {
+          const btn = e.target.closest('[data-quality]');
+          if (!btn) return;
+          state.config.quality = btn.dataset.quality;
+          overlay.querySelectorAll('#pillQuality .pill').forEach(b => b.classList.toggle('active', b.dataset.quality === state.config.quality));
+          updateExportEstimate();
+        });
+
+        checkWebCodecsSupport();
+        updateExportEstimate();
+
+        overlay.querySelector('.btn-cancel').addEventListener('click', () => {
+          state.config.fps      = origFps;
+          state.config.quality  = origQuality;
+          state.config.filename = origFilename;
+          overlay.remove();
+          resolve(false);
+        });
+        overlay.querySelector('.btn-ok').addEventListener('click', () => {
+          state.config.filename = overlay.querySelector('#inputFilename').value.trim() || 'sequentia';
+          pushUndo(); debouncedSave();
+          overlay.remove();
+          resolve(true);
+        });
+      });
+    }
+
     // ── Task 3: Toast ────────────────────────────────────────────────
 
     function showToast(msg, type = 'info') {
@@ -1227,19 +1312,26 @@
         thumb.addEventListener('dragover', e => {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
-          document.querySelectorAll('.thumb.drag-over').forEach(el => el.classList.remove('drag-over'));
-          thumb.classList.add('drag-over');
+          document.querySelectorAll('.thumb.drop-before,.thumb.drop-after').forEach(el => el.classList.remove('drop-before','drop-after'));
+          const rect = thumb.getBoundingClientRect();
+          thumb.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drop-before' : 'drop-after');
         });
-        thumb.addEventListener('dragleave', () => thumb.classList.remove('drag-over'));
+        thumb.addEventListener('dragleave', () => thumb.classList.remove('drop-before','drop-after'));
+        thumb.addEventListener('dragend', () => {
+          document.querySelectorAll('.thumb.drop-before,.thumb.drop-after').forEach(el => el.classList.remove('drop-before','drop-after'));
+        });
         thumb.addEventListener('drop', e => {
           e.preventDefault();
-          thumb.classList.remove('drag-over');
+          const insertBefore = thumb.classList.contains('drop-before');
+          thumb.classList.remove('drop-before','drop-after');
           const fromId = e.dataTransfer.getData('text/plain');
           const fromIdx = state.slides.findIndex(s => s.id === fromId);
-          const toIdx = i;
-          if (fromIdx === -1 || fromIdx === toIdx) return;
+          if (fromIdx === -1) return;
+          const toIdx = insertBefore ? i : i + 1;
+          const adjustedToIdx = fromIdx < toIdx ? toIdx - 1 : toIdx;
+          if (fromIdx === adjustedToIdx) return;
           const [moved] = state.slides.splice(fromIdx, 1);
-          state.slides.splice(toIdx, 0, moved);
+          state.slides.splice(adjustedToIdx, 0, moved);
           renderThumbs();
           pushUndo(); debouncedSave();
         });
@@ -2246,7 +2338,10 @@
           <input type="file" id="bgImageInput" accept="image/jpeg,image/png" hidden>
         </div>
       `;
-      container.appendChild(collapsibleSection('lienzo', 'Lienzo', canvasHTML + bgHTML, true));
+      const colLeft = document.createElement('div');
+      colLeft.className = 'config-col';
+      const colRight = document.createElement('div');
+      colRight.className = 'config-col';
 
       // --- SECCIÓN RITMO (Timing + Transición) ---
       const ritmoHTML = `
@@ -2277,42 +2372,8 @@
           <div class="transition-opts" id="transitionOpts"></div>
         </div>
       `;
-      container.appendChild(collapsibleSection('ritmo', 'Ritmo', ritmoHTML));
+      colLeft.appendChild(collapsibleSection('composicion', 'Composición', canvasHTML + bgHTML + ritmoHTML, true));
 
-      // --- SECCIÓN EXPORTAR ---
-      const exportHTML = `
-        <div class="cfg-row">
-          <span class="cfg-label">FPS</span>
-          <div class="pill-group" id="pillFPS">
-            ${['24','30','60'].map(f =>
-              `<button class="pill${state.config.fps == f ? ' active' : ''}" data-fps="${f}">${f}</button>`
-            ).join('')}
-          </div>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label">Calidad</span>
-          <div class="pill-group" id="pillQuality">
-            ${[['low','Bajo'],['medium','Medio'],['high','Alto']].map(([v,l]) =>
-              `<button class="pill${state.config.quality === v ? ' active' : ''}" data-quality="${v}">${l}</button>`
-            ).join('')}
-          </div>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label">Nombre de archivo</span>
-          <input type="text" class="cfg-input" id="inputFilename" value="${state.config.filename}">
-        </div>
-        <div class="cfg-row">
-          <div class="compat-indicator">
-            <div class="compat-dot" id="compatDot"></div>
-            <span id="compatLabel"></span>
-          </div>
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label">Estimación</span>
-          <span class="cfg-value" id="exportEstimate">–</span>
-        </div>
-      `;
-      container.appendChild(collapsibleSection('export', 'Exportar', exportHTML));
 
       // --- SECCIÓN CAPAS (Texto + Overlays + Audio) ---
       const capasSection = collapsibleSection('capas', 'Capas', '');
@@ -2446,7 +2507,9 @@
         audioControls.style.display = 'block';
       }
 
-      container.appendChild(capasSection);
+      colRight.appendChild(capasSection);
+      container.appendChild(colLeft);
+      container.appendChild(colRight);
 
       // Hidden file inputs for overlay uploads
       const wmInput = document.createElement('input');
@@ -2594,30 +2657,6 @@
         pushUndo(); debouncedSave();
       });
 
-      // FPS
-      document.getElementById('pillFPS').addEventListener('click', e => {
-        const btn = e.target.closest('[data-fps]');
-        if (!btn) return;
-        state.config.fps = parseInt(btn.dataset.fps);
-        document.querySelectorAll('#pillFPS .pill').forEach(b => b.classList.toggle('active', b.dataset.fps == state.config.fps));
-        pushUndo(); debouncedSave(); updateExportEstimate();
-      });
-
-      // Calidad
-      document.getElementById('pillQuality').addEventListener('click', e => {
-        const btn = e.target.closest('[data-quality]');
-        if (!btn) return;
-        state.config.quality = btn.dataset.quality;
-        document.querySelectorAll('#pillQuality .pill').forEach(b => b.classList.toggle('active', b.dataset.quality === state.config.quality));
-        pushUndo(); debouncedSave(); updateExportEstimate();
-      });
-
-      // Nombre de archivo
-      document.getElementById('inputFilename').addEventListener('change', e => {
-        state.config.filename = e.target.value.trim() || 'sequentia';
-        e.target.value = state.config.filename;
-        pushUndo(); debouncedSave();
-      });
     }
 
     // ── Task 10: Overlay event bindings ─────────────────────────────
@@ -3607,7 +3646,7 @@
       });
 
       // Task 12: Export button
-      document.getElementById('btnExport').onclick = () => startExport();
+      document.getElementById('btnExport').onclick = async () => { if (await showExport()) startExport(); };
 
       document.getElementById('btnNewSession').addEventListener('click', async () => {
         if (!await showConfirm('¿Borrar todo y empezar de cero? Se perderán todas las imágenes y ajustes.')) return;
