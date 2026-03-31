@@ -60,22 +60,18 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
-### 2026-04-01 — Sesión 16: Diagnóstico y fixes export + bugs
+### 2026-03-31 (sesión 17) — Docs fix + random pool + bgImage restore + diagnóstico export
 
 **Hecho:**
-- Diagnóstico completo del error de exportación: `esm.sh/mediabunny` sin `?bundle` devuelve un meta-import con imports internos que fallan desde blob: URL → worker crash → "Error en worker: undefined" + "invalid transferable" como síntoma secundario
-- Fix: URL cambiada a `https://esm.sh/mediabunny?bundle` en `MEDIABUNNY_CDN` y en el import del worker — bundle autocontenido, sin imports externos
-- API mediabunny migrada: `Muxer/ArrayBufferTarget` → `Output/BufferTarget/Mp4OutputFormat/EncodedVideoPacketSource/EncodedAudioPacketSource/EncodedPacket`; chunks bufferizados sincrónicamente, añadidos a source con await post-flush
-- Fix blur/fondo personalizado: `drawSlide()` y `drawSlideWorker()` — paso 2 solo si `!bgImageId`; path unificado padding=1.1 siempre
-- Fix seek audio: listener `timeupdate`; trimIn/trimOut actualizan min/max del slider
-- `showPrompt()`: modal con input para guardar presets
-- Fix random transition: diagnosticado — `pickRandomTransition()` usa `TRANSITIONS_LIST` que incluye `'random'` y variantes sin dirección → pendiente fix
-- Custom bgImage no persiste: diagnosticado — `restoreOverlayImages()` no reconstruye `_bgBitmap` → pendiente fix
+- Commit docs: CLAUDE.md y spec actualizados a v2.1 (mediabunny, IndexedDB, 7 transiciones)
+- Fix random transition: `RANDOM_POOL` y `RANDOM_POOL_W` con todas las variantes direccionales (`slide-left/right/up/down`, `wipe-left/right/up/down`), excluye `'random'` y bare `'slide'`/`'wipe'`
+- Fix bgImage persistence: `restoreOverlayImages()` ahora reconstruye `_bgBitmap` desde IndexedDB y actualiza el `src` del preview en UI
+- **Diagnóstico export:** error `DOMException: invalid transferable array for structured clone` en `worker.postMessage`. El export engine completo está roto — la API de mediabunny usada en la implementación (`Output`, `BufferTarget`, `EncodedVideoPacketSource`, `EncodedPacket`, etc.) nunca se verificó contra la API real. El plan original pedía `Muxer`/`ArrayBufferTarget`/`muxer.addVideoChunk()` pero el implementador asumió una API diferente sin confirmar. Toda la implementación del export engine hay que rehacerla.
 
-**Próximo paso (sesión nueva):**
-1. Verificar que exportación funciona con `?bundle`
-2. Fix random: pool dedicado con todas las variantes de dirección (`slide-left`, `slide-right`, etc.)
-3. Fix bgImage persistence: añadir restore de `_bgBitmap` en `restoreOverlayImages()`
+**Próximo paso (sesión nueva) — CRÍTICO:**
+1. Investigar API real de mediabunny: cargar `https://esm.sh/mediabunny?bundle` y leer los exports disponibles, o consultar docs/repo de mediabunny
+2. Reescribir el worker completo (`#worker-src`) y `prepareExportPayload`/`startExport` usando la API confirmada
+3. Verificar que export produce MP4 válido (sin audio primero, luego con audio)
 
 ### 2026-03-31 — Sesión 15: Fixes bugs funcionales
 
