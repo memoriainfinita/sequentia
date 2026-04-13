@@ -1621,6 +1621,11 @@
       return base;
     }
 
+    function getEffectiveEffect(slide) {
+      const raw = slide?.overrides?.effect || state.config.slideEffect || 'none';
+      return raw === 'random' ? (_randomEffect || 'zoom-in') : raw;
+    }
+
     function goToSlide(index) {
       if (state.slides.length === 0) return;
       const clamped = state.config.loop
@@ -1695,6 +1700,7 @@
       if (state.slides.length === 0) return;
       state.playing = true;
       _lastTime = null;
+      _randomEffect = pickRandomEffect();
       _rafId = requestAnimationFrame(_tick);
       updatePlayControls();
       // Audio sync
@@ -1744,6 +1750,7 @@
           _inTransition = false;
           _transElapsed = 0;
           _slideElapsed = 0;
+          _randomEffect = pickRandomEffect();
           // Avanzar slide
           const nextIdx = state.currentIndex + 1;
           if (nextIdx >= state.slides.length) {
@@ -1773,6 +1780,7 @@
           } else if (hasNext && transDur === 0) {
             // Sin transición — saltar directamente
             _slideElapsed = 0;
+            _randomEffect = pickRandomEffect();
             const nextIdx = state.currentIndex + 1;
             if (nextIdx >= state.slides.length) {
               if (state.config.loop) { state.currentIndex = 0; }
