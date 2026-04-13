@@ -1539,8 +1539,7 @@
       // 3. Imagen principal (según fitMode) + efecto de movimiento
       if (slide._bitmap) {
         const fit = calcFit(slide._bitmap.width, slide._bitmap.height, w, h, cfg.fitMode || 'contain');
-        const dur = getEffectiveDuration(slide);
-        const p = easeInOut(Math.min(t / Math.max(dur, 0.001), 1));
+        const p = easeInOut(t);
         const mfit = applyMotion(fit, getEffectiveEffect(slide), p, w, h);
         ctx.drawImage(slide._bitmap, mfit.dx, mfit.dy, mfit.dw, mfit.dh);
       }
