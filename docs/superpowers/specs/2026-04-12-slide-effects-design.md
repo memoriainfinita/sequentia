@@ -118,7 +118,7 @@ const mfit = applyMotion(fit, effect, p, w, h);
 ctx.drawImage(slide._bitmap, mfit.dx, mfit.dy, mfit.dw, mfit.dh);
 ```
 
-Worker version uses same logic with `config` passed in as parameter (same as current worker pattern).
+Worker version uses `slide.resolvedEffect` (a pre-resolved concrete effect ID, never `'random'`) instead of calling `getEffectiveEffect`, because the worker has no access to `state` or `_randomEffect`. See `prepareExportPayload` below.
 
 ---
 
@@ -183,11 +183,24 @@ Add effect row after the transition row:
 </div>
 ```
 
-Handler: same pattern as `ov-transition`.
+Handler: same pattern as `ov-transition` — updates `slide.overrides.effect`, calls `renderThumbs()` (to refresh badge), `pushUndo()`, `debouncedSave()`.
 
 ### Override badge
 
 The existing badge detection checks `ov.duration || ov.transition || ov.transitionDuration || ov.textMode`. Add `|| ov.effect` to include effect overrides.
+
+---
+
+## Export Worker — `prepareExportPayload`
+
+`getEffectiveEffect` cannot run in the worker (no access to `state` or `_randomEffect`). The effect must be resolved in the main thread and included in each slide's payload:
+
+```javascript
+// inside prepareExportPayload, for each slide:
+resolvedEffect: getEffectiveEffect(slide)
+```
+
+`drawSlideWorker` uses `slide.resolvedEffect` directly — no getter needed in the worker.
 
 ---
 
@@ -215,3 +228,4 @@ No changes needed. `overrides.effect` is a plain string field within the existin
 | `buildConfigPanels()` | Add Efecto pills + listener |
 | `buildOverridePanel()` | Add effect select row |
 | Override badge | Add `ov.effect` check |
+| `prepareExportPayload()` | Add `resolvedEffect` per slide |
