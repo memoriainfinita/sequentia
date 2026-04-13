@@ -1869,7 +1869,7 @@
     // ── Transitions (Task 6) ─────────────────────────────────────────
 
     function transitionFade(ctx, slideA, slideB, t, w, h) {
-      drawSlide(ctx, slideA, 0);
+      drawSlide(ctx, slideA, 1);
       const tmp = new OffscreenCanvas(w, h);
       drawSlide(tmp.getContext('2d'), slideB, 0);
       ctx.globalAlpha = t;
@@ -1887,7 +1887,7 @@
       const [,, ax, ay, bx, by] = dirs[dir] || dirs.left;
 
       const tmpA = new OffscreenCanvas(w, h);
-      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      drawSlide(tmpA.getContext('2d'), slideA, 1);
       const tmpB = new OffscreenCanvas(w, h);
       drawSlide(tmpB.getContext('2d'), slideB, 0);
 
@@ -1898,7 +1898,7 @@
 
     function transitionZoomPunch(ctx, slideA, slideB, t, w, h) {
       const tmpA = new OffscreenCanvas(w, h);
-      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      drawSlide(tmpA.getContext('2d'), slideA, 1);
       const tmpB = new OffscreenCanvas(w, h);
       drawSlide(tmpB.getContext('2d'), slideB, 0);
 
@@ -1920,7 +1920,7 @@
 
     function transitionWipe(ctx, slideA, slideB, t, w, h, dir = 'left') {
       const tmpA = new OffscreenCanvas(w, h);
-      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      drawSlide(tmpA.getContext('2d'), slideA, 1);
       const tmpB = new OffscreenCanvas(w, h);
       drawSlide(tmpB.getContext('2d'), slideB, 0);
 
@@ -1939,7 +1939,7 @@
     function transitionCrossZoom(ctx, slideA, slideB, t, w, h, speed = 0.5) {
       const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
       const tmpA = new OffscreenCanvas(w, h);
-      drawSlide(tmpA.getContext('2d'), slideA, 0);
+      drawSlide(tmpA.getContext('2d'), slideA, 1);
       const tmpB = new OffscreenCanvas(w, h);
       drawSlide(tmpB.getContext('2d'), slideB, 0);
 
@@ -1962,7 +1962,7 @@
     function transitionFlash(ctx, slideA, slideB, t, w, h, color = '#ffffff') {
       const flashT = t < 0.5 ? t * 2 : (1 - t) * 2;
       const tmp = new OffscreenCanvas(w, h);
-      drawSlide(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, 0);
+      drawSlide(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, t < 0.5 ? 1 : 0);
       ctx.drawImage(tmp, 0, 0);
       ctx.fillStyle = color;
       ctx.globalAlpha = flashT;
