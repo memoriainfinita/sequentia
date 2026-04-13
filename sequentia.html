@@ -679,7 +679,7 @@
         resolution: '1080p', fitMode: 'contain',
         bgBlur: 0, bgColor: '#000000', bgImageId: null, bgImageBlur: 0,
         slideDuration: 3.0, transitionDuration: 0.5,
-        transition: 'fade',
+        transition: 'fade', slideEffect: 'none',
         fps: 30, quality: 'medium', filename: 'sequentia',
         loop: false,
         watermark: null, frame: null, vignette: 0, vignetteColor: '#000000',
@@ -1958,6 +1958,57 @@
       ctx.globalAlpha = flashT;
       ctx.fillRect(0, 0, w, h);
       ctx.globalAlpha = 1;
+    }
+
+    const EFFECTS_LIST = ['none','zoom-in','zoom-out','pan-right','pan-left','pan-down','pan-up','ken-burns','ken-burns-rev','random'];
+    const EFFECT_RANDOM_POOL = ['zoom-in','zoom-out','pan-right','pan-left','pan-down','pan-up','ken-burns','ken-burns-rev'];
+    let _randomEffect = 'zoom-in';
+    function pickRandomEffect() {
+      return EFFECT_RANDOM_POOL[Math.floor(Math.random() * EFFECT_RANDOM_POOL.length)];
+    }
+
+    function easeInOut(p) { return p < 0.5 ? 2*p*p : -1+(4-2*p)*p; }
+
+    function applyMotion(fit, effect, p, w, h) {
+      const ZOOM = 0.15;
+      const PAN  = 0.06;
+      let { dx, dy, dw, dh } = fit;
+      switch (effect) {
+        case 'zoom-in': {
+          const scale = 1 + ZOOM * p;
+          const cx = dx + dw / 2, cy = dy + dh / 2;
+          return { dx: cx - (dw * scale) / 2, dy: cy - (dh * scale) / 2, dw: dw * scale, dh: dh * scale };
+        }
+        case 'zoom-out': {
+          const scale = 1 + ZOOM * (1 - p);
+          const cx = dx + dw / 2, cy = dy + dh / 2;
+          return { dx: cx - (dw * scale) / 2, dy: cy - (dh * scale) / 2, dw: dw * scale, dh: dh * scale };
+        }
+        case 'pan-right':
+          return { dx: dx + w * PAN * (2 * p - 1), dy, dw, dh };
+        case 'pan-left':
+          return { dx: dx + w * PAN * (1 - 2 * p), dy, dw, dh };
+        case 'pan-down':
+          return { dx, dy: dy + h * PAN * (2 * p - 1), dw, dh };
+        case 'pan-up':
+          return { dx, dy: dy + h * PAN * (1 - 2 * p), dw, dh };
+        case 'ken-burns': {
+          const scale = 1 + ZOOM * p;
+          const cx = dx + dw / 2, cy = dy + dh / 2;
+          const panX = w * (PAN / 2) * p;
+          const panY = h * (PAN / 2) * p;
+          return { dx: cx - (dw * scale) / 2 - panX, dy: cy - (dh * scale) / 2 - panY, dw: dw * scale, dh: dh * scale };
+        }
+        case 'ken-burns-rev': {
+          const scale = 1 + ZOOM * (1 - p);
+          const cx = dx + dw / 2, cy = dy + dh / 2;
+          const panX = w * (PAN / 2) * (1 - p);
+          const panY = h * (PAN / 2) * (1 - p);
+          return { dx: cx - (dw * scale) / 2 + panX, dy: cy - (dh * scale) / 2 + panY, dw: dw * scale, dh: dh * scale };
+        }
+        default:
+          return fit;
+      }
     }
 
     let _randomTransition = 'fade';
