@@ -1,6 +1,6 @@
 ---
 created: 2026-03-28
-last_updated: 2026-03-31 (sesión 22)
+last_updated: 2026-04-13 (sesión 23)
 version: 1.0
 ---
 
@@ -60,6 +60,25 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-04-13 (sesión 23) — Diseño: slide motion effects
+
+**Hecho:**
+- Brainstorming + diseño completo de efectos de movimiento por slide (zoom, pan, Ken Burns)
+- Spec: `docs/superpowers/specs/2026-04-12-slide-effects-design.md`
+- Plan: `docs/superpowers/plans/2026-04-13-slide-effects.md`
+
+**Decisiones:**
+- 10 efectos: none, zoom-in, zoom-out, pan-right, pan-left, pan-down, pan-up, ken-burns, ken-burns-rev, random
+- Sin slider de intensidad — valores internos fijos (zoom 15%, pan 6%)
+- Efectos congelados durante transiciones (slideA en t=1, slideB en t=0)
+- Helper `applyMotion()` puro, compartido entre main thread y worker
+- `prepareExportPayload` resuelve `resolvedEffect` antes de enviar al worker
+- Mismo modelo de control que transiciones: global + override por slide + random
+
+**Próximo paso:** ejecutar el plan (8 tasks) con subagent-driven-development en sesión nueva
+
+---
+
 ### 2026-03-31 (sesión 22) — UX: drag reorder, layout config, modal export
 
 **Hecho:**
@@ -78,7 +97,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
   - `.btn-ok.btn-export` con color accent (naranja)
   - Handlers de FPS/Quality/Filename eliminados de `buildConfigPanels`
 
-**Próximo paso:** ninguno pendiente — app estable
+**Próximo paso:** implementar slide motion effects — plan en `docs/superpowers/plans/2026-04-13-slide-effects.md`
 
 ### 2026-03-31 (sesión 21) — UX fixes + nuevas features menores
 
