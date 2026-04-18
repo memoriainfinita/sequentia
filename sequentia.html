@@ -1259,7 +1259,7 @@
 
         // Override badge
         const ov = slide.overrides || {};
-        const hasOverrides = ov.duration || ov.transition || ov.transitionDuration || (ov.textMode && ov.textMode !== 'inherit');
+        const hasOverrides = ov.duration || ov.transition || ov.transitionDuration || ov.effect || (ov.textMode && ov.textMode !== 'inherit');
         if (hasOverrides) {
           const badge = document.createElement('span');
           badge.className = 'thumb-badge-ov';
@@ -3291,6 +3291,15 @@
           </select>
         </div>
         <div class="ov-row">
+          <span class="ov-label">Efecto</span>
+          <select class="ov-effect" style="background:var(--s3);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;font-family:var(--sans)">
+            <option value="">Global (${state.config.slideEffect})</option>
+            ${['none','zoom-in','zoom-out','pan-right','pan-left','pan-down','pan-up','ken-burns','ken-burns-rev','random'].map(e =>
+              `<option value="${e}"${ov.effect === e ? ' selected' : ''}>${e}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="ov-row">
           <span class="ov-label">Dur. transición <span style="color:var(--text);font-family:var(--mono)">(global: ${state.config.transitionDuration}s)</span></span>
           <input type="number" class="cfg-input ov-trans-duration" style="width:64px"
                  step="0.1" min="0" value="${ov.transitionDuration ?? ''}" placeholder="–">
@@ -3319,6 +3328,13 @@
       // Transición
       panel.querySelector('.ov-transition').addEventListener('change', e => {
         slide.overrides.transition = e.target.value || null;
+        renderThumbs();
+        pushUndo(); debouncedSave();
+      });
+
+      // Efecto
+      panel.querySelector('.ov-effect').addEventListener('change', e => {
+        slide.overrides.effect = e.target.value || null;
         renderThumbs();
         pushUndo(); debouncedSave();
       });
