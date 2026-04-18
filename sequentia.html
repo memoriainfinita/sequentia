@@ -4228,7 +4228,7 @@ function drawSlideWorker(ctx, slide, t, w, h, config) {
   // 3. Main image (fitMode) + motion effect
   if (slide.bitmap) {
     const fit = calcFit(slide.bitmap.width, slide.bitmap.height, w, h, config.fitMode || 'contain');
-    const p = easeInOut(Math.min(t / Math.max(slide.duration, 0.001), 1));
+    const p = easeInOut(Math.min(t, 1));
     const mfit = applyMotion(fit, slide.resolvedEffect || 'none', p, w, h);
     ctx.drawImage(slide.bitmap, mfit.dx, mfit.dy, mfit.dw, mfit.dh);
   }
