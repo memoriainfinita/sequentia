@@ -60,6 +60,25 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 
 ## History
 
+### 2026-04-18 (sesión 24) — Implementación: slide motion effects
+
+**Hecho:**
+- 8 tasks implementadas con subagent-driven-development (10 commits)
+- Rama: `feat/slide-motion-effects`
+- `EFFECTS_LIST`, `applyMotion`, `easeInOut` — main thread y worker
+- `getEffectiveEffect` getter + random pick en `_tick` y `play()`
+- `drawSlide` y `drawSlideWorker` aplican efecto de movimiento
+- 6 funciones de transición (main thread + worker): slideA congelado en t=1
+- UI: pills "Efecto" en panel Composición
+- UI: override por slide + badge detection
+- `prepareExportPayload` añade `resolvedEffect` (resuelto antes de enviar al worker)
+
+**Fix crítico aplicado (x2):** `t` en `drawSlide` y `drawSlideWorker` ya es 0-1 normalizado — no dividir por duración.
+
+**Próximo paso:** prueba manual en Firefox — verificar efectos en preview y export
+
+---
+
 ### 2026-04-13 (sesión 23) — Diseño: slide motion effects
 
 **Hecho:**
@@ -75,7 +94,7 @@ Fade · Slide (4 dir) · Zoom Punch · Wipe (4 dir) · Cross-Zoom (velocidad sli
 - `prepareExportPayload` resuelve `resolvedEffect` antes de enviar al worker
 - Mismo modelo de control que transiciones: global + override por slide + random
 
-**Próximo paso:** ejecutar el plan (8 tasks) con subagent-driven-development en sesión nueva
+**Estado:** completado en sesión 24
 
 ---
 
