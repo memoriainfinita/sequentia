@@ -4358,7 +4358,7 @@ function drawTextOverlayWorker(ctx, textObj, t, w, h, slideDuration) {
 // ── Transition functions (worker versions) ───────────────────────────
 
 function transitionFadeW(ctx, slideA, slideB, t, w, h, config) {
-  drawSlideWorker(ctx, slideA, 0, w, h, config);
+  drawSlideWorker(ctx, slideA, 1, w, h, config);
   const tmp = new OffscreenCanvas(w, h);
   drawSlideWorker(tmp.getContext('2d'), slideB, 0, w, h, config);
   ctx.globalAlpha = t;
@@ -4376,7 +4376,7 @@ function transitionSlideW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
   const [,, ax, ay, bx, by] = dirs[dir] || dirs.left;
 
   const tmpA = new OffscreenCanvas(w, h);
-  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 1, w, h, config);
   const tmpB = new OffscreenCanvas(w, h);
   drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
 
@@ -4387,7 +4387,7 @@ function transitionSlideW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
 
 function transitionZoomPunchW(ctx, slideA, slideB, t, w, h, config) {
   const tmpA = new OffscreenCanvas(w, h);
-  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 1, w, h, config);
   const tmpB = new OffscreenCanvas(w, h);
   drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
 
@@ -4409,7 +4409,7 @@ function transitionZoomPunchW(ctx, slideA, slideB, t, w, h, config) {
 
 function transitionWipeW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
   const tmpA = new OffscreenCanvas(w, h);
-  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 1, w, h, config);
   const tmpB = new OffscreenCanvas(w, h);
   drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
 
@@ -4428,7 +4428,7 @@ function transitionWipeW(ctx, slideA, slideB, t, w, h, config, dir = 'left') {
 function transitionCrossZoomW(ctx, slideA, slideB, t, w, h, config) {
   const ease = t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
   const tmpA = new OffscreenCanvas(w, h);
-  drawSlideWorker(tmpA.getContext('2d'), slideA, 0, w, h, config);
+  drawSlideWorker(tmpA.getContext('2d'), slideA, 1, w, h, config);
   const tmpB = new OffscreenCanvas(w, h);
   drawSlideWorker(tmpB.getContext('2d'), slideB, 0, w, h, config);
 
@@ -4452,7 +4452,7 @@ function transitionCrossZoomW(ctx, slideA, slideB, t, w, h, config) {
 function transitionFlashW(ctx, slideA, slideB, t, w, h, config) {
   const flashT = t < 0.5 ? t * 2 : (1 - t) * 2;
   const tmp = new OffscreenCanvas(w, h);
-  drawSlideWorker(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, 0, w, h, config);
+  drawSlideWorker(tmp.getContext('2d'), t < 0.5 ? slideA : slideB, t < 0.5 ? 1 : 0, w, h, config);
   ctx.drawImage(tmp, 0, 0);
   ctx.fillStyle = config.flashColor ?? '#ffffff';
   ctx.globalAlpha = flashT;
