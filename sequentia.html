@@ -2432,6 +2432,20 @@
           </div>
           <div class="transition-opts" id="transitionOpts"></div>
         </div>
+        <div class="ov-subsection" style="margin-top:10px">
+          <div class="cfg-row" style="margin-bottom:8px">
+            <span class="cfg-label" style="font-weight:500;color:var(--text)">Efecto</span>
+          </div>
+          <div class="pill-group" id="pillEffect">
+            ${[
+              ['none','Ninguno'],['zoom-in','Zoom +'],['zoom-out','Zoom −'],
+              ['pan-right','Pan →'],['pan-left','Pan ←'],['pan-down','Pan ↓'],['pan-up','Pan ↑'],
+              ['ken-burns','Ken Burns'],['ken-burns-rev','KB Rev.'],['random','Random']
+            ].map(([v,l]) =>
+              `<button class="pill${state.config.slideEffect === v ? ' active' : ''}" data-effect="${v}">${l}</button>`
+            ).join('')}
+          </div>
+        </div>
       `;
       colLeft.appendChild(collapsibleSection('composicion', 'Composición', canvasHTML + bgHTML + ritmoHTML, true));
 
@@ -2715,6 +2729,15 @@
         state.config.transition = btn.dataset.trans;
         document.querySelectorAll('#pillTransition .pill').forEach(b => b.classList.toggle('active', b.dataset.trans === state.config.transition));
         updateTransitionOpts();
+        pushUndo(); debouncedSave();
+      });
+
+      // Efecto pills
+      document.getElementById('pillEffect').addEventListener('click', e => {
+        const btn = e.target.closest('[data-effect]');
+        if (!btn) return;
+        state.config.slideEffect = btn.dataset.effect;
+        document.querySelectorAll('#pillEffect .pill').forEach(b => b.classList.toggle('active', b.dataset.effect === state.config.slideEffect));
         pushUndo(); debouncedSave();
       });
 
