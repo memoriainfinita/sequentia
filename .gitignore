@@ -9,3 +9,5 @@ Thumbs.db
 # Temp
 *.tmp
 .archive/
+state.md
+CLAUDE.md
