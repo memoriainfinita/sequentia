@@ -1,4 +1,4 @@
-# Sequentia
+# sequentia
 
 [![Live demo](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://memoriainfinita.github.io/sequentia/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -6,6 +6,8 @@
 Turn a folder of images into a video with transitions. One HTML file, no build step, no dependencies, no server.
 
 **[Open it](https://memoriainfinita.github.io/sequentia/)** and drop your images on the page.
+
+![sequentia with five images loaded: the preview of the first slide, the strip of slides and the composition panel](docs/sequentia-demo.png)
 
 Sequentia covers the gap between full video editors and presentation tools that do not produce video. The workflow is meant to be fast: dozens of images in seconds.
 
@@ -28,3 +30,7 @@ Vanilla HTML, CSS and JavaScript. No frameworks, no build tools. The whole appli
 ## License
 
 GPL-3.0-or-later.
+
+## Credits
+
+Developed by [@memoriainfinita](https://github.com/memoriainfinita) with the assistance of Claude (Anthropic).
