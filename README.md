@@ -5,7 +5,7 @@
 
 Turn a folder of images into a video with transitions. One HTML file, no build step, no dependencies, no server.
 
-**[Open it](https://memoriainfinita.github.io/sequentia/)** and drop your images on the page.
+**[Open it](https://memoriainfinita.github.io/sequentia/)** and drop your images on the page. **[Guide](docs/guide/README.md)**: how to use it, step by step.
 
 ![sequentia with five images loaded: the preview of the first slide, the strip of slides and the composition panel](docs/sequentia-demo.png)
 
